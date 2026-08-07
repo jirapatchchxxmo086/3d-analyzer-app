@@ -1,13 +1,13 @@
 import streamlit as st
 import trimesh
 
-# 1. การตั้งค่าหน้าเว็บ
+# 1. ตั้งค่าหน้าเว็บ
 st.set_page_config(
     page_title="3D Model Analyzer Pro", page_icon="📦", layout="centered"
 )
 
 # 2. ปรับแต่ง Theme และ Font ผ่าน Sidebar
-st.sidebar.header("🎨 Appearance & Settings")
+st.sidebar.header("⚙️ ตั้งค่ารูปแบบหน้าเว็บ")
 
 font_choice = st.sidebar.selectbox(
     "เลือกฟอนต์ (Font)",
@@ -26,7 +26,6 @@ theme_choice = st.sidebar.selectbox(
     index=0,
 )
 
-# กำหนดสไตล์สีตามการเลือก
 theme_colors = {
     "Ocean Blue 🌊": {
         "primary": "#2563eb",
@@ -52,10 +51,13 @@ theme_colors = {
 
 selected_theme = theme_colors[theme_choice]
 
-# 3. โหลด Lucide Icons, Google Fonts และสั่งการ CSS
+# 3. โหลด Font Awesome Icons, Google Fonts และสั่งการ CSS
 st.markdown(
     f"""
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- โหลด Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- โหลด Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Kanit:wght@300;400;600&family=Poppins:wght@400;600&family=Prompt:wght@300;400;600&family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
@@ -137,7 +139,7 @@ st.markdown(
 st.markdown(
     f"""
     <div class="icon-title">
-        <i data-lucide="box"></i> 3D Model Analyzer Pro
+        <i class="fa-solid fa-cube"></i> 3D Model Analyzer Pro
     </div>
 """,
     unsafe_allow_html=True,
@@ -167,7 +169,7 @@ if uploaded_file is not None:
 
       st.success("Processing Completed Successfully!")
 
-      # เอฟเฟกต์ดาว/ซากุระพาสเทลลอยละมุน ✨
+      # เอฟเฟกต์ดาวพาสเทลลอยละมุน ✨
       st.markdown(
           """
           <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
@@ -186,7 +188,7 @@ if uploaded_file is not None:
           unsafe_allow_html=True,
       )
 
-      # ใช้ระบบ Tab แยกการแสดงผลข้อมูล
+      # ระบบ Tab
       tab1, tab2, tab3 = st.tabs([
           "📊 ภาพรวม (Summary)",
           "📏 ขนาดชิ้นงาน (Dimensions)",
@@ -199,7 +201,7 @@ if uploaded_file is not None:
           st.markdown(
               f"""
                         <div class="metric-card">
-                            <div class="metric-label"><i data-lucide="blocks"></i> พื้นที่ผิว (Surface Area)</div>
+                            <div class="metric-label"><i class="fa-solid fa-layer-group"></i> พื้นที่ผิว (Surface Area)</div>
                             <div class="metric-val">{surface_area_sqm:.4f} sq.m.</div>
                         </div>
                     """,
@@ -210,7 +212,7 @@ if uploaded_file is not None:
           st.markdown(
               f"""
                         <div class="metric-card">
-                            <div class="metric-label"><i data-lucide="boxes"></i> ปริมาตร (Volume)</div>
+                            <div class="metric-label"><i class="fa-solid fa-cubes"></i> ปริมาตร (Volume)</div>
                             <div class="metric-val">{volume_cu_cm:.2f} cu.cm.</div>
                         </div>
                     """,
@@ -221,7 +223,7 @@ if uploaded_file is not None:
           st.markdown(
               """
                         <div class="status-badge status-solid">
-                            <i data-lucide="square-mouse-pointer"></i> สถานะ: ชิ้นงานสมบูรณ์ (Solid Closed Mesh)
+                            <i class="fa-solid fa-circle-check"></i> สถานะ: ชิ้นงานสมบูรณ์ (Solid Closed Mesh)
                         </div>
                     """,
               unsafe_allow_html=True,
@@ -230,7 +232,7 @@ if uploaded_file is not None:
           st.markdown(
               """
                         <div class="status-badge status-leak">
-                            <i data-lucide="square-dashed-mouse-pointer"></i> สถานะ: ชิ้นงานมีรูรั่วหรือไม่ใช่ Solid Mesh
+                            <i class="fa-solid fa-triangle-exclamation"></i> สถานะ: ชิ้นงานมีรูรั่วหรือไม่ใช่ Solid Mesh
                         </div>
                     """,
               unsafe_allow_html=True,
@@ -240,7 +242,7 @@ if uploaded_file is not None:
         st.markdown(
             """
                     <div class="icon-subtitle">
-                        <i data-lucide="ruler"></i> Bounding Box Dimensions
+                        <i class="fa-solid fa-ruler-combined"></i> Bounding Box Dimensions
                     </div>
                 """,
             unsafe_allow_html=True,
@@ -259,7 +261,7 @@ if uploaded_file is not None:
         st.markdown(
             """
                     <div class="icon-subtitle">
-                        <i data-lucide="calculator"></i> 3D Printing Cost Estimator
+                        <i class="fa-solid fa-calculator"></i> 3D Printing Cost Estimator
                     </div>
                 """,
             unsafe_allow_html=True,
@@ -282,6 +284,3 @@ if uploaded_file is not None:
 
     except Exception as e:
       st.error(f"เกิดข้อผิดพลาดในการประมวลผล: {e}")
-
-# Render Lucide Icons
-st.markdown("<script>lucide.createIcons();</script>", unsafe_allow_html=True)
