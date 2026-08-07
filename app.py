@@ -55,10 +55,10 @@ selected_theme = theme_colors[theme_choice]
 # 3. โหลด Lucide Icons, Google Fonts และสั่งการ CSS
 st.markdown(
     f"""
-    <script src="[https://unpkg.com/lucide@latest](https://unpkg.com/lucide@latest)"></script>
-    <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
-    <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
-    <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Kanit:wght@300;400;600&family=Poppins:wght@400;600&family=Prompt:wght@300;400;600&family=Sarabun:wght@300;400;600&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Kanit:wght@300;400;600&family=Poppins:wght@400;600&family=Prompt:wght@300;400;600&family=Sarabun:wght@300;400;600&display=swap)" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Kanit:wght@300;400;600&family=Poppins:wght@400;600&family=Prompt:wght@300;400;600&family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
     
     <style>
         html, body, [class*="css"] {{
@@ -166,7 +166,25 @@ if uploaded_file is not None:
       width, depth, height = mesh.extents
 
       st.success("Processing Completed Successfully!")
-      st.balloons()
+
+      # เอฟเฟกต์ดาว/ซากุระพาสเทลลอยละมุน ✨
+      st.markdown(
+          """
+          <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+          <script>
+              confetti({
+                  particleCount: 35,
+                  spread: 60,
+                  origin: { y: 0.6 },
+                  colors: ['#ffb7b2', '#ffdac1', '#e2f0cb', '#b5edd4', '#c7ceea'],
+                  gravity: 0.5,
+                  ticks: 250,
+                  scalar: 0.9
+              });
+          </script>
+      """,
+          unsafe_allow_html=True,
+      )
 
       # ใช้ระบบ Tab แยกการแสดงผลข้อมูล
       tab1, tab2, tab3 = st.tabs([
