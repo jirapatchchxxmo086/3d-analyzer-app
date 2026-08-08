@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#FF5A9D"         # สีชมพู Vibrant Pop สำหรับปุ่มและไฮไลต์
+backgroundColor = "#FAFAFA"      # พื้นหลังสีขาวครีมนุ่มๆ
+secondaryBackgroundColor = "#FFFFFF" # กล่องการ์ด/ช่อง Drop File สีขาวสะอาด
+textColor = "#2D3748"            # ตัวอักษรสีเทาเข้ม อ่านง่าย
+font = "sans serif"
