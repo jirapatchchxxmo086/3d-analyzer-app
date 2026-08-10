@@ -1,243 +1,161 @@
-import streamlit as st
-import trimesh
-
-# 1. ตั้งค่าหน้าเว็บ
-st.set_page_config(
-    page_title="3D Model Analyzer Pro", page_icon="📦", layout="centered"
-)
-
-# 2. โหลด Font Awesome Icons และสั่งการ CSS สำหรับ Layout & Custom UI
-st.markdown(
-    """
-    <!-- โหลด Font Awesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <style>
-        .icon-title {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 30px;
-            font-weight: 700;
-            color: #2563eb;
-            margin-bottom: 5px;
+class ManufacturingCostCalculator:
+    def __init__(self):
+        # 1. ฐานข้อมูลวัสดุ
+        self.materials = {
+            "aluminum_6061": {
+                "name": "อลูมิเนียม 6061",
+                "density_g_cm3": 2.70,
+                "price_per_kg": 180.0,
+                "waste_factor": 1.10  # เผื่อเศษเสีย 10%
+            },
+            "stainless_304": {
+                "name": "สแตนเลส 304",
+                "density_g_cm3": 8.00,
+                "price_per_kg": 220.0,
+                "waste_factor": 1.08
+            },
+            "mild_steel": {
+                "name": "เหล็กแผ่น SS400",
+                "density_g_cm3": 7.85,
+                "price_per_kg": 42.0,
+                "waste_factor": 1.12
+            }
         }
-        .icon-subtitle {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 20px;
-            font-weight: 600;
-            color: #334155;
-            margin-top: 15px;
-            margin-bottom: 10px;
+
+        # 2. ฐานข้อมูลเครื่องจักร (Machine & Rate DB)
+        self.machines = {
+            "cnc_milling_3axis": {
+                "name": "CNC Milling 3-Axis",
+                "machine_rate_per_hr": 450.0,  # ค่าชั่วโมงเครื่องจักร (บาท/ชม.)
+                "labor_rate_per_hr": 200.0,    # ค่าแรงพนักงานคุมเครื่อง (บาท/ชม.)
+                "default_setup_hr": 1.0        # เวลาเซ็ตเครื่องมาตรฐาน (ชม.)
+            },
+            "cnc_lathe": {
+                "name": "CNC Lathe (เครื่องกลึง)",
+                "machine_rate_per_hr": 350.0,
+                "labor_rate_per_hr": 180.0,
+                "default_setup_hr": 0.5
+            },
+            "laser_cutting": {
+                "name": "Laser Cutting Machine",
+                "machine_rate_per_hr": 800.0,
+                "labor_rate_per_hr": 200.0,
+                "default_setup_hr": 0.25
+            }
         }
-        .metric-card {
-            background-color: #f0f6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 12px;
-            padding: 16px 20px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+    def calculate_total_cost(
+        self,
+        material_key: str,
+        surface_area_cm2: float,
+        thickness_mm: float,
+        machine_key: str,
+        cycle_time_mins: float,
+        batch_size: int = 1,
+        setup_time_hrs: float = None,
+        tooling_cost_per_part: float = 0.0,
+        overhead_percent: float = 15.0
+    ) -> dict:
+        """
+        คำนวณต้นทุนรวม (วัสดุ + ค่าแปรรูป + โอกับ)
+        """
+        # --- PART 1: คำนวณต้นทุนวัสดุ (Material Cost) ---
+        if material_key not in self.materials:
+            raise ValueError(f"ไม่พบวัสดุ: {material_key}")
+        mat = self.materials[material_key]
+
+        thickness_cm = thickness_mm / 10.0
+        volume_cm3 = surface_area_cm2 * thickness_cm
+        net_weight_kg = (volume_cm3 * mat["density_g_cm3"]) / 1000.0
+        gross_weight_kg = net_weight_kg * mat["waste_factor"]
+        material_cost_per_part = gross_weight_kg * mat["price_per_kg"]
+
+        # --- PART 2: คำนวณค่าแปรรูป (Machining & Processing Cost) ---
+        if machine_key not in self.machines:
+            raise ValueError(f"ไม่พบเครื่องจักร: {machine_key}")
+        mc = self.machines[machine_key]
+
+        # รวมอัตราค่าบริการต่อชั่วโมง (Machine + Labor)
+        total_hourly_rate = mc["machine_rate_per_hr"] + mc["labor_rate_per_hr"]
+
+        # เวลา Setup ต่อชิ้น (หารกระจายตามขนาด Batch)
+        actual_setup_hrs = setup_time_hrs if setup_time_hrs is not None else mc["default_setup_hr"]
+        setup_time_per_part_hrs = actual_setup_hrs / batch_size
+        setup_cost_per_part = setup_time_per_part_hrs * total_hourly_rate
+
+        # เวลาการตัด/แปรรูปต่อชิ้น (Cycle Time)
+        cycle_time_hrs = cycle_time_mins / 60.0
+        run_cost_per_part = cycle_time_hrs * total_hourly_rate
+
+        # ค่าแปรรูปพื้นฐานต่อชิ้น
+        machining_cost_per_part = setup_cost_per_part + run_cost_per_part + tooling_cost_per_part
+
+        # --- PART 3: สรุปต้นทุนรวมและ Overhead ---
+        direct_cost = material_cost_per_part + machining_cost_per_part
+        overhead_cost = direct_cost * (overhead_percent / 100.0)
+        total_unit_cost = direct_cost + overhead_cost
+        total_batch_cost = total_unit_cost * batch_size
+
+        return {
+            "summary": {
+                "material_name": mat["name"],
+                "machine_name": mc["name"],
+                "batch_size": batch_size,
+                "total_unit_cost": round(total_unit_cost, 2),
+                "total_batch_cost": round(total_batch_cost, 2)
+            },
+            "breakdown_per_part": {
+                "material_cost": round(material_cost_per_part, 2),
+                "setup_cost": round(setup_cost_per_part, 2),
+                "machining_run_cost": round(run_cost_per_part, 2),
+                "tooling_cost": round(tooling_cost_per_part, 2),
+                "overhead_cost": round(overhead_cost, 2)
+            },
+            "technical_details": {
+                "gross_weight_kg": round(gross_weight_kg, 4),
+                "cycle_time_mins": cycle_time_mins,
+                "setup_hrs_total": actual_setup_hrs,
+                "hourly_rate_combined": total_hourly_rate
+            }
         }
-        .metric-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-        }
-        .metric-label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
-            color: #64748b;
-        }
-        .metric-val {
-            font-size: 24px;
-            font-weight: 700;
-            color: #0f172a;
-            margin-top: 6px;
-        }
-        .status-badge {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 18px;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 600;
-            margin-top: 15px;
-        }
-        .status-solid {
-            background-color: #dcfce7;
-            color: #166534;
-            border: 1px solid #86efac;
-        }
-        .status-leak {
-            background-color: #fef9c3;
-            color: #854d0e;
-            border: 1px solid #fde047;
-        }
-    </style>
-""",
-    unsafe_allow_html=True,
-)
 
-# 3. ส่วนหัวข้อหลัก
-st.markdown(
-    """
-    <div class="icon-title">
-        <i class="fa-solid fa-cube"></i> 3D Model Analyzer Pro
-    </div>
-""",
-    unsafe_allow_html=True,
-)
 
-st.write(
-    "อัปโหลดไฟล์ 3D (.stl, .obj) เพื่อวิเคราะห์พื้นที่ผิว ปริมาตร ขนาดโครงสร้าง"
-    " และประมาณการต้นทุนการพิมพ์ 3D"
-)
+# ==========================================
+# ตัวอย่างการใช้งาน
+# ==========================================
+if __name__ == "__main__":
+    calc = ManufacturingCostCalculator()
 
-uploaded_file = st.file_uploader(
-    "ลากไฟล์มาวางที่นี่ หรือกด Browse files", type=["stl", "obj"]
-)
+    # ตั้งค่าพารามิเตอร์การผลิต
+    JOB_PARAMS = {
+        "material_key": "aluminum_6061",   # วัสดุ: อลูมิเนียม 6061
+        "surface_area_cm2": 320.0,          # พื้นที่ผิว 320 cm²
+        "thickness_mm": 12.0,               # ความหนา 12 mm
+        "machine_key": "cnc_milling_3axis", # เครื่องจักร: CNC Milling
+        "cycle_time_mins": 18.0,            # เวลาแปรรูปจริงต่อชิ้น 18 นาที
+        "batch_size": 20,                   # จำนวนผลิต 20 ชิ้น
+        "setup_time_hrs": 1.5,              # เวลาเซ็ตเครื่อง 1.5 ชั่วโมง
+        "tooling_cost_per_part": 25.0,      # ค่าสึกหรอดอกกัด/Tooling 25 บาท/ชิ้น
+        "overhead_percent": 12.0            # โอกับ/บริหารจัดการ 12%
+    }
 
-if uploaded_file is not None:
-    with st.spinner("Processing 3D file..."):
-        try:
-            mesh = trimesh.load(
-                uploaded_file, file_type=uploaded_file.name.split(".")[-1]
-            )
-            if isinstance(mesh, trimesh.Scene):
-                mesh = mesh.dump(concatenate=True)
+    res = calc.calculate_total_cost(**JOB_PARAMS)
 
-            surface_area_sqm = mesh.area / 1_000_000.0
-            volume_cu_cm = (
-                mesh.volume / 1_000.0 if mesh.is_watertight else 0.0
-            )
-            width, depth, height = mesh.extents
-
-            st.success("Processing Completed Successfully!")
-
-            # เอฟเฟกต์ดาวพาสเทลลอยละมุน ✨
-            st.markdown(
-                """
-                <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
-                <script>
-                    confetti({
-                        particleCount: 35,
-                        spread: 60,
-                        origin: { y: 0.6 },
-                        colors: ['#ffb7b2', '#ffdac1', '#e2f0cb', '#b5edd4', '#c7ceea'],
-                        gravity: 0.5,
-                        ticks: 250,
-                        scalar: 0.9
-                    });
-                </script>
-            """,
-                unsafe_allow_html=True,
-            )
-
-            # ระบบ Tab
-            tab1, tab2, tab3 = st.tabs([
-                "📊 ภาพรวม (Summary)",
-                "📏 ขนาดชิ้นงาน (Dimensions)",
-                "💰 ประมาณการราคาพิมพ์ (3D Cost)",
-            ])
-
-            with tab1:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(
-                        f"""
-                        <div class="metric-card">
-                            <div class="metric-label"><i class="fa-solid fa-layer-group"></i> พื้นที่ผิว (Surface Area)</div>
-                            <div class="metric-val">{surface_area_sqm:.4f} sq.m.</div>
-                        </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
-
-                with col2:
-                    st.markdown(
-                        f"""
-                        <div class="metric-card">
-                            <div class="metric-label"><i class="fa-solid fa-cubes"></i> ปริมาตร (Volume)</div>
-                            <div class="metric-val">{volume_cu_cm:.2f} cu.cm.</div>
-                        </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
-
-                if mesh.is_watertight:
-                    st.markdown(
-                        """
-                        <div class="status-badge status-solid">
-                            <i class="fa-solid fa-circle-check"></i> สถานะ: ชิ้นงานสมบูรณ์ (Solid Closed Mesh)
-                        </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        """
-                        <div class="status-badge status-leak">
-                            <i class="fa-solid fa-triangle-exclamation"></i> สถานะ: ชิ้นงานมีรูรั่วหรือไม่ใช่ Solid Mesh
-                        </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
-
-            with tab2:
-                st.markdown(
-                    """
-                    <div class="icon-subtitle">
-                        <i class="fa-solid fa-ruler-combined"></i> Bounding Box Dimensions
-                    </div>
-                """,
-                    unsafe_allow_html=True,
-                )
-
-                col_w, col_d, col_h = st.columns(3)
-                col_w.metric("ความกว้าง (Width)", f"{width:.1f} mm")
-                col_d.metric("ความยาว (Depth)", f"{depth:.1f} mm")
-                col_h.metric("ความสูง (Height)", f"{height:.1f} mm")
-
-                with st.expander(
-                    "🔍 รายละเอียดทางเทคนิคเพิ่มเติม (Advanced Specs)"
-                ):
-                    st.write(f"**จำนวน Vertices:** {len(mesh.vertices):,}")
-                    st.write(f"**จำนวน Faces:** {len(mesh.faces):,}")
-
-            with tab3:
-                st.markdown(
-                    """
-                    <div class="icon-subtitle">
-                        <i class="fa-solid fa-calculator"></i> 3D Printing Cost Estimator
-                    </div>
-                """,
-                    unsafe_allow_html=True,
-                )
-
-                material = st.selectbox(
-                    "เลือกประเภทเส้นพลาสติก", ["PLA", "ABS", "PETG"]
-                )
-                density_map = {"PLA": 1.24, "ABS": 1.04, "PETG": 1.27}
-                infill = st.slider("เปอร์เซ็นต์ Infill (%)", 10, 100, 20)
-                price_per_gram = st.number_input(
-                    "ราคาเส้นพลาสติก (บาท/กรัม)", value=0.8
-                )
-
-                # คำนวณน้ำหนักและราคาประมาณการ
-                estimated_weight = (
-                    volume_cu_cm * density_map[material] * (infill / 100)
-                )
-                estimated_cost = estimated_weight * price_per_gram
-
-                c1, c2 = st.columns(2)
-                c1.metric(
-                    "น้ำหนักประมาณการ (Weight)", f"{estimated_weight:.1f} grams"
-                )
-                c2.metric("ค่าวัสดุประมาณการ (Cost)", f"฿{estimated_cost:.2f}")
-
-        except Exception as e:
-            st.error(f"เกิดข้อผิดพลาดในการประมวลผล: {e}")
+    # แสดงผลรายงาน
+    print("==================================================")
+    print("      รายงานสรุปการประเมินต้นทุนการผลิต (Manufacturing Cost)")
+    print("==================================================")
+    print(f"• วัสดุที่ใช้        : {res['summary']['material_name']}")
+    print(f"• เครื่องจักร      : {res['summary']['machine_name']}")
+    print(f"• ขนาด Batch การผลิต : {res['summary']['batch_size']} ชิ้น")
+    print("--------------------------------------------------")
+    print("สัดส่วนต้นทุนต่อชิ้น (Cost Breakdown per Unit):")
+    print(f"  1. ค่าวัสดุ (Material Cost)     : {res['breakdown_per_part']['material_cost']:>8.2f} บาท")
+    print(f"  2. ค่า Setup เครื่อง (หาร Batch)  : {res['breakdown_per_part']['setup_cost']:>8.2f} บาท")
+    print(f"  3. ค่าแปรรูปจริง (Run Cost)     : {res['breakdown_per_part']['machining_run_cost']:>8.2f} บาท")
+    print(f"  4. ค่า Tooling / เครื่องมือตัด  : {res['breakdown_per_part']['tooling_cost']:>8.2f} บาท")
+    print(f"  5. ค่าโอกับ (Overhead {JOB_PARAMS['overhead_percent']}%)   : {res['breakdown_per_part']['overhead_cost']:>8.2f} บาท")
+    print("--------------------------------------------------")
+    print(f"★ ต้นทุนรวมต่อชิ้น (Total Unit Cost)  : {res['summary']['total_unit_cost']:>8.2f} บาท")
+    print(f"★ ต้นทุนรวมทั้ง Batch ({JOB_PARAMS['batch_size']} ชิ้น)       : {res['summary']['total_batch_cost']:>8.2f} บาท")
+    print("==================================================")
