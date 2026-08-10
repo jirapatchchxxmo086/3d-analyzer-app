@@ -6,31 +6,14 @@ st.set_page_config(
     page_title="3D Model Analyzer Pro", page_icon="📦", layout="centered"
 )
 
-# 2. ปรับแต่ง Font ผ่าน Sidebar
-st.sidebar.header("⚙️ ตั้งค่ารูปแบบหน้าเว็บ")
-
-font_choice = st.sidebar.selectbox(
-    "เลือกฟอนต์ (Font)",
-    options=["Kanit", "Prompt", "Sarabun", "Inter", "Poppins"],
-    index=0,
-)
-
-# 3. โหลด Font Awesome Icons, Google Fonts และสั่งการ CSS
+# 2. โหลด Font Awesome Icons และสั่งการ CSS สำหรับ Layout & Custom UI
 st.markdown(
-    f"""
+    """
     <!-- โหลด Font Awesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- โหลด Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Kanit:wght@300;400;600&family=Poppins:wght@400;600&family=Prompt:wght@300;400;600&family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
-    
     <style>
-        html, body, [class*="css"] {{
-            font-family: '{font_choice}', sans-serif;
-        }}
-        .icon-title {{
+        .icon-title {
             display: flex;
             align-items: center;
             gap: 12px;
@@ -38,8 +21,8 @@ st.markdown(
             font-weight: 700;
             color: #2563eb;
             margin-bottom: 5px;
-        }}
-        .icon-subtitle {{
+        }
+        .icon-subtitle {
             display: flex;
             align-items: center;
             gap: 8px;
@@ -48,33 +31,33 @@ st.markdown(
             color: #334155;
             margin-top: 15px;
             margin-bottom: 10px;
-        }}
-        .metric-card {{
+        }
+        .metric-card {
             background-color: #f0f6ff;
             border: 1px solid #bfdbfe;
             border-radius: 12px;
             padding: 16px 20px;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }}
-        .metric-card:hover {{
+        }
+        .metric-card:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-        }}
-        .metric-label {{
+        }
+        .metric-label {
             display: flex;
             align-items: center;
             gap: 8px;
             font-size: 14px;
             color: #64748b;
-        }}
-        .metric-val {{
+        }
+        .metric-val {
             font-size: 24px;
             font-weight: 700;
             color: #0f172a;
             margin-top: 6px;
-        }}
-        .status-badge {{
+        }
+        .status-badge {
             display: flex;
             align-items: center;
             gap: 8px;
@@ -83,23 +66,23 @@ st.markdown(
             font-size: 15px;
             font-weight: 600;
             margin-top: 15px;
-        }}
-        .status-solid {{
+        }
+        .status-solid {
             background-color: #dcfce7;
             color: #166534;
             border: 1px solid #86efac;
-        }}
-        .status-leak {{
+        }
+        .status-leak {
             background-color: #fef9c3;
             color: #854d0e;
             border: 1px solid #fde047;
-        }}
+        }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
-# 4. ส่วนหัวข้อหลัก
+# 3. ส่วนหัวข้อหลัก
 st.markdown(
     """
     <div class="icon-title">
