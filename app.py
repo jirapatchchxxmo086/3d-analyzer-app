@@ -13,12 +13,12 @@ st.set_page_config(page_title="3D Model Analyzer", page_icon="📦", layout="wid
 st.title("📦 3D Model Dimension & Surface Area Analyzer")
 st.write("Upload a 3D model file to automatically extract bounding box dimensions, surface area, and volume.")
 
-# Sidebar for Model Unit Selection (แก้ปัญหาไฟล์ 3D ไม่มีระบุหน่วยวัด)
+# Sidebar for Model Unit Selection
 st.sidebar.header("⚙️ Unit Settings")
 unit_input = st.sidebar.selectbox(
     "Select Model File Unit",
     options=["Millimeters (mm)", "Centimeters (cm)", "Meters (m)"],
-    index=0,  # Default เป็น Millimeters (mm) ตามมาตรฐานไฟล์วิศวกรรม/3D Printing
+    index=0,
     help="3D formats (OBJ, STL, PLY) store raw numbers without units. Select the unit used when creating the model."
 )
 
@@ -49,19 +49,16 @@ def process_and_clean_mesh(loaded_data):
         mesh = loaded_data
 
     if isinstance(mesh, trimesh.Trimesh):
-        # ลบหน้าซ้อนทับ (Duplicate Faces) แบบปลอดภัยรองรับ trimesh ทุกเวอร์ชัน
         try:
             mesh.update_faces(mesh.unique_faces())
         except Exception:
             pass
             
-        # ลบหน้าสามเหลี่ยมที่แบนราบไร้พื้นที่ (Degenerate Faces)
         try:
             mesh.remove_degenerate_faces()
         except Exception:
             pass
             
-        # ลบค่าอนันต์ที่เป็นข้อผิดพลาดของพิกัด
         try:
             mesh.remove_infinite_values()
         except Exception:
@@ -186,24 +183,19 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     file_extension = os.path.splitext(uploaded_file.name)[1].lower()
     
-    # Save to temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
 
     try:
         with st.spinner("Processing 3D model file..."):
-            # Load 3D model
             loaded_data = trimesh.load(tmp_path)
-            
-            # Process & Clean Mesh
             mesh = process_and_clean_mesh(loaded_data)
 
-            # Check object type
             is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
-            # 1. Calculate Bounding Box Dimensions
-            extents_raw = mesh.extents  # Raw values from file
+            # 1. Bounding Box Dimensions
+            extents_raw = mesh.extents
             width_x_m = extents_raw[0] * scale_to_m
             length_y_m = extents_raw[1] * scale_to_m
             height_z_m = extents_raw[2] * scale_to_m
@@ -243,7 +235,6 @@ if uploaded_file is not None:
         st.success("✅ File processed successfully!")
         st.divider()
 
-        # Split Layout: ฝั่งซ้าย 3D Viewer / ฝั่งขวา Metrics
         col_viewer, col_metrics = st.columns([1.2, 1])
 
         with col_viewer:
@@ -256,7 +247,6 @@ if uploaded_file is not None:
                 st.info("No 3D Viewer preview available for this model type.")
 
         with col_metrics:
-            # Display Dimensions
             st.subheader("📐 Model Dimensions")
             dim_col1, dim_col2, dim_col3 = st.columns(3)
             dim_col1.metric("Width (X)", f"{width_x_mm:.2f} mm", f"{width_x_m:.4f} m")
@@ -265,15 +255,17 @@ if uploaded_file is not None:
 
             st.markdown("---")
 
-            # Display Surface Area & Volume
+            # Display Surface Area (หลักเป็น sq.m) & Volume
             st.subheader("📊 Surface Area & Volume")
             res_a, res_b = st.columns(2)
-            res_a.metric("Total Surface Area", f"{surface_area_cm2:,.2f} cm²", f"{surface_area_m2:.6f} m²")
+            
+            # ปรับให้ค่าหลักแสดงหน่วย sq.m และค่ารองแสดง sq.cm
+            res_a.metric("Total Surface Area", f"{surface_area_m2:.6f} sq.m", f"{surface_area_cm2:,.2f} sq.cm")
             
             if is_watertight:
-                res_b.metric("Volume (Exact)", f"{volume_cm3:,.2f} cm³", f"{volume_m3:.6f} m³")
+                res_b.metric("Volume (Exact)", f"{volume_m3:.6f} cu.m", f"{volume_cm3:,.2f} cu.cm")
             elif used_convex_hull and volume_m3 > 0:
-                res_b.metric("Volume (Convex Hull)", f"{volume_cm3:,.2f} cm³", f"{volume_m3:.6f} m³")
+                res_b.metric("Volume (Convex Hull)", f"{volume_m3:.6f} cu.m", f"{volume_cm3:,.2f} cu.cm")
                 st.info("💡 **Note:** Model is non-watertight or Point Cloud. Volume calculated using Convex Hull approximation.")
             else:
                 res_b.info("Model mesh is non-watertight and volume couldn't be calculated.")
