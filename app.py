@@ -8,25 +8,26 @@ from string import Template
 import streamlit.components.v1 as components
 
 # Page configuration
-st.set_page_config(page_title="3D Model Analyzer & Viewer", page_icon="📦", layout="wide")
+st.set_page_config(page_title="3D Model Analyzer", page_icon="📦", layout="wide")
 
 st.title("📦 3D Model Dimension & Surface Area Analyzer")
-st.write("อัปโหลดไฟล์ 3D เพื่อคำนวณพื้นที่ผิว ขนาด Bounding Box และแสดงผลโมเดลสามมิติ")
+st.write("Upload a 3D model file to automatically extract bounding box dimensions, surface area, and volume.")
 
-# Sidebar for Model Unit Selection
+# Sidebar for Model Unit Selection (แก้ปัญหาไฟล์ 3D ไม่มีระบุหน่วยวัด)
 st.sidebar.header("⚙️ Unit Settings")
 unit_input = st.sidebar.selectbox(
     "Select Model File Unit",
     options=["Millimeters (mm)", "Centimeters (cm)", "Meters (m)"],
-    index=0,
-    help="3D formats store raw numbers without units. Select the unit used when creating the model."
+    index=0,  # Default เป็น Millimeters (mm) ตามมาตรฐานไฟล์วิศวกรรม/3D Printing
+    help="3D formats (OBJ, STL, PLY) store raw numbers without units. Select the unit used when creating the model."
 )
 
+# Scaling Factor to standard Meters
 if unit_input == "Meters (m)":
     scale_to_m = 1.0
 elif unit_input == "Millimeters (mm)":
     scale_to_m = 0.001
-else:
+else:  # Centimeters (cm)
     scale_to_m = 0.01
 
 st.sidebar.divider()
@@ -48,13 +49,27 @@ def process_and_clean_mesh(loaded_data):
         mesh = loaded_data
 
     if isinstance(mesh, trimesh.Trimesh):
-        mesh.remove_duplicate_faces()
-        mesh.remove_degenerate_faces()
-        mesh.remove_infinite_values()
+        # ลบหน้าซ้อนทับ (Duplicate Faces) แบบปลอดภัยรองรับ trimesh ทุกเวอร์ชัน
+        try:
+            mesh.update_faces(mesh.unique_faces())
+        except Exception:
+            pass
+            
+        # ลบหน้าสามเหลี่ยมที่แบนราบไร้พื้นที่ (Degenerate Faces)
+        try:
+            mesh.remove_degenerate_faces()
+        except Exception:
+            pass
+            
+        # ลบค่าอนันต์ที่เป็นข้อผิดพลาดของพิกัด
+        try:
+            mesh.remove_infinite_values()
+        except Exception:
+            pass
         
     return mesh
 
-# HTML Template แยกไวยากรณ์ด้วย string.Template ป้องกัน f-string syntax error
+# Template HTML สำหรับแสดงผล 3D Interactive Viewer ด้วย Three.js
 HTML_TEMPLATE = Template("""
 <!DOCTYPE html>
 <html>
@@ -159,7 +174,7 @@ def render_3d_viewer(mesh_obj):
         b64_stl = base64.b64encode(stl_bytes).decode('utf-8')
         return HTML_TEMPLATE.substitute(b64_stl=b64_stl)
     except Exception as e:
-        st.warning(f"ไม่สามารถแสดงผล 3D Preview ได้: {e}")
+        st.warning(f"Unable to render 3D preview: {e}")
         return None
 
 # File uploader component
@@ -171,18 +186,24 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     file_extension = os.path.splitext(uploaded_file.name)[1].lower()
     
+    # Save to temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
 
     try:
         with st.spinner("Processing 3D model file..."):
+            # Load 3D model
             loaded_data = trimesh.load(tmp_path)
+            
+            # Process & Clean Mesh
             mesh = process_and_clean_mesh(loaded_data)
 
+            # Check object type
             is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
-            extents_raw = mesh.extents
+            # 1. Calculate Bounding Box Dimensions
+            extents_raw = mesh.extents  # Raw values from file
             width_x_m = extents_raw[0] * scale_to_m
             length_y_m = extents_raw[1] * scale_to_m
             height_z_m = extents_raw[2] * scale_to_m
@@ -191,6 +212,7 @@ if uploaded_file is not None:
             length_y_mm = length_y_m * 1000.0
             height_z_mm = height_z_m * 1000.0
 
+            # 2. Surface Area and Volume Calculations
             surface_area_m2 = 0.0
             volume_m3 = 0.0
             is_watertight = False
@@ -219,18 +241,22 @@ if uploaded_file is not None:
             volume_cm3 = volume_m3 * 1_000_000.0
 
         st.success("✅ File processed successfully!")
-        
+        st.divider()
+
+        # Split Layout: ฝั่งซ้าย 3D Viewer / ฝั่งขวา Metrics
         col_viewer, col_metrics = st.columns([1.2, 1])
 
         with col_viewer:
             st.subheader("🖥️ 3D Model Interactive Viewer")
+            st.caption("Rotate: Left Click | Zoom: Scroll | Pan: Right Click")
             html_viewer = render_3d_viewer(mesh)
             if html_viewer:
                 components.html(html_viewer, height=510)
             else:
-                st.info("No 3D Viewer preview available.")
+                st.info("No 3D Viewer preview available for this model type.")
 
         with col_metrics:
+            # Display Dimensions
             st.subheader("📐 Model Dimensions")
             dim_col1, dim_col2, dim_col3 = st.columns(3)
             dim_col1.metric("Width (X)", f"{width_x_mm:.2f} mm", f"{width_x_m:.4f} m")
@@ -239,6 +265,7 @@ if uploaded_file is not None:
 
             st.markdown("---")
 
+            # Display Surface Area & Volume
             st.subheader("📊 Surface Area & Volume")
             res_a, res_b = st.columns(2)
             res_a.metric("Total Surface Area", f"{surface_area_cm2:,.2f} cm²", f"{surface_area_m2:.6f} m²")
@@ -247,8 +274,9 @@ if uploaded_file is not None:
                 res_b.metric("Volume (Exact)", f"{volume_cm3:,.2f} cm³", f"{volume_m3:.6f} m³")
             elif used_convex_hull and volume_m3 > 0:
                 res_b.metric("Volume (Convex Hull)", f"{volume_cm3:,.2f} cm³", f"{volume_m3:.6f} m³")
+                st.info("💡 **Note:** Model is non-watertight or Point Cloud. Volume calculated using Convex Hull approximation.")
             else:
-                res_b.info("Model mesh is non-watertight.")
+                res_b.info("Model mesh is non-watertight and volume couldn't be calculated.")
 
     except Exception as e:
         st.error(f"An error occurred while processing the file: {str(e)}")
