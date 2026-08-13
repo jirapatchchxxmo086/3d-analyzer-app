@@ -18,9 +18,9 @@ st.sidebar.header("⚙️ Unit Settings")
 unit_input = st.sidebar.selectbox(
     "Select Model File Unit",
     options=[
-        "Meters (m)", 
-        "Decimeters / 10 cm (dm)", 
-        "Centimeters (cm)", 
+        "Meters (m)",
+        "Decimeters / 10 cm (dm)",
+        "Centimeters (cm)",
         "Millimeters (mm)"
     ],
     index=0,
@@ -39,6 +39,7 @@ else:  # Millimeters (mm)
 
 st.sidebar.divider()
 
+
 def process_and_clean_mesh(loaded_data):
     if isinstance(loaded_data, trimesh.Scene):
         geometries = []
@@ -47,7 +48,7 @@ def process_and_clean_mesh(loaded_data):
             geom = loaded_data.geometry[geometry_name].copy()
             geom.apply_transform(transform)
             geometries.append(geom)
-            
+
         if geometries:
             mesh = trimesh.util.concatenate(geometries)
         else:
@@ -60,18 +61,96 @@ def process_and_clean_mesh(loaded_data):
             mesh.update_faces(mesh.unique_faces())
         except Exception:
             pass
-            
+
         try:
             mesh.remove_degenerate_faces()
         except Exception:
             pass
-            
+
         try:
             mesh.remove_infinite_values()
         except Exception:
             pass
-        
+
     return mesh
+
+
+# ---------------------------------------------------------------------------
+# NEW: Shape complexity / detail-level analysis
+# ---------------------------------------------------------------------------
+def analyze_complexity(mesh, is_point_cloud):
+    """
+    Estimate how visually/geometrically complex (detailed) a shape is, using
+    resolution-independent proxies — NOT triangle/vertex count, since that
+    depends on export settings rather than actual sculptural detail.
+
+    Two signals, each naturally scaled 0..1:
+
+    1) Smoothness index (isoperimetric quotient) = 36*pi*V^2 / A^3
+       A perfect sphere scores 1.0 (the most surface-area-efficient shape
+       for its volume). Rougher / more convoluted surfaces score lower.
+
+    2) Convexity ratio = volume / convex_hull.volume
+       A fully convex shape (no dents, holes, undercuts) scores close to 1.0.
+       Sculptures with folds, gaps, or deep carving score lower.
+
+    These two are combined into a single 0-100% "detail score" and bucketed
+    into a human-readable level.
+
+    Limitations (be upfront about these with the business):
+    - These are geometric PROXIES, not a literal measure of artistic effort.
+    - Very fine surface texture (e.g. carved fur/feathers) only shows up if
+      the mesh itself was exported at high enough resolution to contain that
+      geometry — a decimated/low-poly export of a detailed sculpture will
+      under-score here even though the original artwork is detailed.
+    - Works on watertight-ish meshes; falls back to convex-hull volume for
+      non-watertight meshes, which slightly reduces sensitivity.
+    """
+    if is_point_cloud or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
+        return None
+
+    area = mesh.area
+    if area <= 0:
+        return None
+
+    try:
+        hull = mesh.convex_hull
+        hull_volume = hull.volume
+    except Exception:
+        return None
+
+    if hull_volume <= 0:
+        return None
+
+    volume = mesh.volume if mesh.is_watertight else hull_volume
+
+    # 1) Smoothness index — 1.0 = perfect sphere, lower = rougher relative to volume
+    ipq = (36 * np.pi * (volume ** 2)) / (area ** 3)
+    smoothness_index = float(np.clip(ipq, 0.0, 1.0))
+
+    # 2) Convexity ratio — 1.0 = fully convex, lower = more dents/holes/undercuts
+    convexity_ratio = float(np.clip(volume / hull_volume, 0.0, 1.0))
+
+    # Composite detail score (0-100%), equal weight on both signals
+    detail_score = ((1 - smoothness_index) * 0.5 + (1 - convexity_ratio) * 0.5) * 100
+    detail_score = round(float(np.clip(detail_score, 0.0, 100.0)), 1)
+
+    if detail_score < 15:
+        level = "เรียบง่าย (Simple)"
+    elif detail_score < 35:
+        level = "รายละเอียดปานกลาง (Moderate)"
+    elif detail_score < 60:
+        level = "มีรายละเอียดมาก (Detailed)"
+    else:
+        level = "รายละเอียดสูงมาก (Highly Detailed)"
+
+    return {
+        "score": detail_score,
+        "level": level,
+        "smoothness_index": round(smoothness_index, 3),
+        "convexity_ratio": round(convexity_ratio, 3),
+    }
+
 
 # Template HTML สำหรับแสดงผล 3D Interactive Viewer ด้วย Three.js
 HTML_TEMPLATE = Template("""
@@ -135,14 +214,14 @@ HTML_TEMPLATE = Template("""
             const loader = new THREE.STLLoader();
             const arrayBuffer = base64ToArrayBuffer("$b64_stl");
             const geometry = loader.parse(arrayBuffer);
-            
+
             geometry.center();
             geometry.computeVertexNormals();
 
-            const material = new THREE.MeshStandardMaterial({ 
-                color: 0x2196F3, 
-                roughness: 0.3, 
-                metalness: 0.2 
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x2196F3,
+                roughness: 0.3,
+                metalness: 0.2
             });
             const mesh = new THREE.Mesh(geometry, material);
             scene.add(mesh);
@@ -170,6 +249,7 @@ HTML_TEMPLATE = Template("""
 </html>
 """)
 
+
 def render_3d_viewer(mesh_obj):
     try:
         if isinstance(mesh_obj, trimesh.PointCloud) or len(mesh_obj.vertices) == 0:
@@ -181,15 +261,16 @@ def render_3d_viewer(mesh_obj):
         st.warning(f"Unable to render 3D preview: {e}")
         return None
 
+
 # File uploader component
 uploaded_file = st.file_uploader(
-    "Select a 3D model file", 
+    "Select a 3D model file",
     type=["stl", "obj", "ply", "off", "3mf"]
 )
 
 if uploaded_file is not None:
     file_extension = os.path.splitext(uploaded_file.name)[1].lower()
-    
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
@@ -239,6 +320,9 @@ if uploaded_file is not None:
             surface_area_cm2 = surface_area_m2 * 10_000.0
             volume_cm3 = volume_m3 * 1_000_000.0
 
+            # 3. NEW: Complexity / detail-level analysis
+            complexity = analyze_complexity(mesh, is_point_cloud)
+
         st.success("✅ File processed successfully!")
         st.divider()
 
@@ -269,9 +353,9 @@ if uploaded_file is not None:
 
             st.subheader("📊 Surface Area & Volume")
             res_a, res_b = st.columns(2)
-            
+
             res_a.metric("Total Surface Area", f"{surface_area_m2:.4f} sq.m", f"{surface_area_cm2:,.1f} sq.cm")
-            
+
             if is_watertight:
                 res_b.metric("Volume (Exact)", f"{volume_m3:.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
             elif used_convex_hull and volume_m3 > 0:
@@ -280,9 +364,25 @@ if uploaded_file is not None:
             else:
                 res_b.info("Model mesh is non-watertight and volume couldn't be calculated.")
 
+            # NEW: Complexity / detail-level section
+            st.markdown("---")
+            st.subheader("🔍 Shape Complexity / Detail Level")
+            if complexity:
+                st.metric("Estimated Detail Level", complexity["level"], f"{complexity['score']}%")
+                st.progress(complexity["score"] / 100)
+                with st.expander("ตัวชี้วัดที่ใช้คำนวณ (สำหรับผู้ที่สนใจรายละเอียด)"):
+                    st.write(f"- **Smoothness index** (ดัชนีความเรียบ): {complexity['smoothness_index']} — 1.0 คือทรงกลมสมบูรณ์ (เรียบที่สุด)")
+                    st.write(f"- **Convexity ratio** (อัตราส่วนความนูน): {complexity['convexity_ratio']} — 1.0 คือไม่มีส่วนเว้า/รู/ซอกมุมเลย")
+                    st.caption(
+                        "หมายเหตุ: ตัวเลขนี้เป็นตัวชี้วัดเชิงรูปทรงทางเรขาคณิต ไม่ใช่การวัด 'ความประณีตของฝีมือ' โดยตรง "
+                        "หากไฟล์ถูกลดความละเอียด (decimate) มาก พื้นผิวที่มีลวดลายละเอียดจริงอาจได้คะแนนต่ำกว่าความเป็นจริง"
+                    )
+            else:
+                st.info("ไม่สามารถวิเคราะห์ระดับความซับซ้อนของโมเดลนี้ได้ (ไฟล์อาจเป็น point cloud หรือ mesh ว่างเปล่า)")
+
     except Exception as e:
         st.error(f"An error occurred while processing the file: {str(e)}")
-    
+
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
