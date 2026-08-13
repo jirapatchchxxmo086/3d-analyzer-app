@@ -81,30 +81,43 @@ def process_and_clean_mesh(loaded_data):
 def analyze_complexity(mesh, is_point_cloud):
     """
     Estimate how visually/geometrically complex (detailed) a shape is, using
-    resolution-independent proxies — NOT triangle/vertex count, since that
-    depends on export settings rather than actual sculptural detail.
+    ONLY the outer surface geometry — no volume, no watertightness required.
+    This matters because sculpture scans/exports are often not perfectly
+    sealed, which makes volume-based measures unreliable.
 
-    Two signals, each naturally scaled 0..1:
+    Two signals, each naturally >= 1.0 for a perfectly plain convex shape:
 
-    1) Smoothness index (isoperimetric quotient) = 36*pi*V^2 / A^3
-       A perfect sphere scores 1.0 (the most surface-area-efficient shape
-       for its volume). Rougher / more convoluted surfaces score lower.
+    1) Area excess ratio = mesh.area / convex_hull.area
+       A plain convex blob (egg, smooth stone) scores close to 1.0 — its
+       surface is almost the same as its own outer envelope. A surface full
+       of folds, ridges, or fine texture has much MORE actual surface area
+       than its envelope, so this ratio climbs well above 1.0.
 
-    2) Convexity ratio = volume / convex_hull.volume
-       A fully convex shape (no dents, holes, undercuts) scores close to 1.0.
-       Sculptures with folds, gaps, or deep carving score lower.
+    2) Total curvature ratio = sum(|vertex_defects|) / (4*pi)
+       `vertex_defects` is a standard discrete-geometry measure of how sharp
+       the surface bends at each point (angle deficit vs. a flat 360°).
+       By the Gauss-Bonnet theorem, a smooth convex shape (sphere, egg, even
+       a cube) totals to close to 4*pi regardless of size. Shapes with lots
+       of alternating bumps, creases, and hollows accumulate much more total
+       curvature than that baseline, so the ratio climbs above 1.0.
 
-    These two are combined into a single 0-100% "detail score" and bucketed
-    into a human-readable level.
+    Both signals are combined into a single 0-100% "detail score" and
+    bucketed into a human-readable level.
+
+    Calibration note: the ratio-to-percent mapping below (CURVE_STEEPNESS
+    constants) is a reasonable starting guess, not a proven scale. Run this
+    against 5-10 real pieces whose difficulty you already know, and adjust
+    AREA_RATIO_K / CURVATURE_RATIO_K until the scores match your own sense
+    of "simple vs. highly detailed" before using it to price real jobs.
 
     Limitations (be upfront about these with the business):
     - These are geometric PROXIES, not a literal measure of artistic effort.
-    - Very fine surface texture (e.g. carved fur/feathers) only shows up if
-      the mesh itself was exported at high enough resolution to contain that
-      geometry — a decimated/low-poly export of a detailed sculpture will
-      under-score here even though the original artwork is detailed.
-    - Works on watertight-ish meshes; falls back to convex-hull volume for
-      non-watertight meshes, which slightly reduces sensitivity.
+    - Very fine surface texture only shows up if the mesh was exported at
+      high enough resolution to actually contain that geometry — a
+      decimated/low-poly export of a detailed sculpture will under-score
+      here even though the original artwork is detailed.
+    - `vertex_defects` assumes a reasonably clean, manifold mesh; very messy
+      or self-intersecting meshes may give noisy results.
     """
     if is_point_cloud or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
         return None
@@ -115,25 +128,40 @@ def analyze_complexity(mesh, is_point_cloud):
 
     try:
         hull = mesh.convex_hull
-        hull_volume = hull.volume
+        hull_area = hull.area
     except Exception:
         return None
 
-    if hull_volume <= 0:
+    if hull_area <= 0:
         return None
 
-    volume = mesh.volume if mesh.is_watertight else hull_volume
+    # 1) Area excess ratio — how much more surface than its own smooth envelope
+    area_ratio = float(area / hull_area)
 
-    # 1) Smoothness index — 1.0 = perfect sphere, lower = rougher relative to volume
-    ipq = (36 * np.pi * (volume ** 2)) / (area ** 3)
-    smoothness_index = float(np.clip(ipq, 0.0, 1.0))
+    # 2) Total curvature ratio — how much bending/folding the surface has overall
+    try:
+        total_abs_curvature = float(np.sum(np.abs(mesh.vertex_defects)))
+        curvature_ratio = total_abs_curvature / (4.0 * np.pi)
+    except Exception:
+        curvature_ratio = None
 
-    # 2) Convexity ratio — 1.0 = fully convex, lower = more dents/holes/undercuts
-    convexity_ratio = float(np.clip(volume / hull_volume, 0.0, 1.0))
+    # --- Map open-ended ratios (>= ~1.0) onto a saturating 0-100% score ---
+    # Tune these two constants against real samples (see calibration note above).
+    AREA_RATIO_K = 1.2       # higher = score climbs faster with area_ratio
+    CURVATURE_RATIO_K = 0.6  # higher = score climbs faster with curvature_ratio
 
-    # Composite detail score (0-100%), equal weight on both signals
-    detail_score = ((1 - smoothness_index) * 0.5 + (1 - convexity_ratio) * 0.5) * 100
-    detail_score = round(float(np.clip(detail_score, 0.0, 100.0)), 1)
+    def _ratio_to_pct(ratio, k):
+        return float(np.clip(1 - np.exp(-k * max(ratio - 1.0, 0.0)), 0.0, 1.0)) * 100
+
+    area_component = _ratio_to_pct(area_ratio, AREA_RATIO_K)
+
+    if curvature_ratio is not None:
+        curvature_component = _ratio_to_pct(curvature_ratio, CURVATURE_RATIO_K)
+        detail_score = round(0.5 * area_component + 0.5 * curvature_component, 1)
+    else:
+        # curvature signal unavailable (messy mesh) — fall back to area ratio alone
+        curvature_component = None
+        detail_score = round(area_component, 1)
 
     if detail_score < 15:
         level = "เรียบง่าย (Simple)"
@@ -147,8 +175,8 @@ def analyze_complexity(mesh, is_point_cloud):
     return {
         "score": detail_score,
         "level": level,
-        "smoothness_index": round(smoothness_index, 3),
-        "convexity_ratio": round(convexity_ratio, 3),
+        "area_ratio": round(area_ratio, 3),
+        "curvature_ratio": round(curvature_ratio, 3) if curvature_ratio is not None else None,
     }
 
 
@@ -371,11 +399,16 @@ if uploaded_file is not None:
                 st.metric("Estimated Detail Level", complexity["level"], f"{complexity['score']}%")
                 st.progress(complexity["score"] / 100)
                 with st.expander("ตัวชี้วัดที่ใช้คำนวณ (สำหรับผู้ที่สนใจรายละเอียด)"):
-                    st.write(f"- **Smoothness index** (ดัชนีความเรียบ): {complexity['smoothness_index']} — 1.0 คือทรงกลมสมบูรณ์ (เรียบที่สุด)")
-                    st.write(f"- **Convexity ratio** (อัตราส่วนความนูน): {complexity['convexity_ratio']} — 1.0 คือไม่มีส่วนเว้า/รู/ซอกมุมเลย")
+                    st.write(f"- **Area excess ratio** (พื้นที่ผิวจริง ÷ พื้นที่ผิว convex hull): {complexity['area_ratio']} — 1.0 คือผิวเรียบเนียนเท่าเปลือกห่อภายนอกพอดี ยิ่งสูงยิ่งมีริ้ว/รอยพับ/รายละเอียดเยอะ")
+                    if complexity['curvature_ratio'] is not None:
+                        st.write(f"- **Total curvature ratio** (ความโค้ง/สันรวมทั้งผิว ÷ ค่าฐานของทรงนูนเรียบ): {complexity['curvature_ratio']} — ยิ่งสูงยิ่งมีมุมแหลม/สัน/หลุมสลับกันเยอะ")
+                    else:
+                        st.write("- **Total curvature ratio**: คำนวณไม่ได้ (mesh อาจไม่สมบูรณ์) — ใช้เฉพาะ area excess ratio แทน")
                     st.caption(
-                        "หมายเหตุ: ตัวเลขนี้เป็นตัวชี้วัดเชิงรูปทรงทางเรขาคณิต ไม่ใช่การวัด 'ความประณีตของฝีมือ' โดยตรง "
-                        "หากไฟล์ถูกลดความละเอียด (decimate) มาก พื้นผิวที่มีลวดลายละเอียดจริงอาจได้คะแนนต่ำกว่าความเป็นจริง"
+                        "หมายเหตุ: ตัวเลขนี้คำนวณจากรูปทรงพื้นผิวล้วนๆ ไม่ใช้ปริมาตรเลย จึงใช้ได้แม้ไฟล์ไม่ปิดสนิท (non-watertight) "
+                        "แต่ยังเป็นตัวชี้วัดเชิงเรขาคณิต ไม่ใช่การวัด 'ความประณีตของฝีมือ' โดยตรง "
+                        "หากไฟล์ถูกลดความละเอียด (decimate) มาก พื้นผิวที่มีลวดลายละเอียดจริงอาจได้คะแนนต่ำกว่าความเป็นจริง "
+                        "— แนะนำให้ลองปรับค่า AREA_RATIO_K / CURVATURE_RATIO_K ในโค้ดให้เข้ากับชิ้นงานจริงของธุรกิจก่อนใช้ตัดสินราคา"
                     )
             else:
                 st.info("ไม่สามารถวิเคราะห์ระดับความซับซ้อนของโมเดลนี้ได้ (ไฟล์อาจเป็น point cloud หรือ mesh ว่างเปล่า)")
