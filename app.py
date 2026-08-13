@@ -13,22 +13,22 @@ st.set_page_config(page_title="3D Model Analyzer", page_icon="📦", layout="wid
 st.title("📦 3D Model Dimension & Surface Area Analyzer")
 st.write("Upload a 3D model file to automatically extract bounding box dimensions, surface area, and volume.")
 
-# Sidebar for Model Unit Selection
+# Sidebar for Model Unit Selection (ปรับ Default เป็น Meters ให้เหมาะกับสเกลโรงงาน)
 st.sidebar.header("⚙️ Unit Settings")
 unit_input = st.sidebar.selectbox(
     "Select Model File Unit",
-    options=["Millimeters (mm)", "Centimeters (cm)", "Meters (m)"],
-    index=0,
+    options=["Meters (m)", "Centimeters (cm)", "Millimeters (mm)"],
+    index=0,  # Default เป็น Meters (m)
     help="3D formats (OBJ, STL, PLY) store raw numbers without units. Select the unit used when creating the model."
 )
 
 # Scaling Factor to standard Meters
 if unit_input == "Meters (m)":
     scale_to_m = 1.0
-elif unit_input == "Millimeters (mm)":
-    scale_to_m = 0.001
-else:  # Centimeters (cm)
+elif unit_input == "Centimeters (cm)":
     scale_to_m = 0.01
+else:  # Millimeters (mm)
+    scale_to_m = 0.001
 
 st.sidebar.divider()
 
@@ -194,15 +194,15 @@ if uploaded_file is not None:
 
             is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
-            # 1. Bounding Box Dimensions
+            # 1. Bounding Box Dimensions (เน้นหน่วย Meter และ Centimeter)
             extents_raw = mesh.extents
             width_x_m = extents_raw[0] * scale_to_m
             length_y_m = extents_raw[1] * scale_to_m
             height_z_m = extents_raw[2] * scale_to_m
 
-            width_x_mm = width_x_m * 1000.0
-            length_y_mm = length_y_m * 1000.0
-            height_z_mm = height_z_m * 1000.0
+            width_x_cm = width_x_m * 100.0
+            length_y_cm = length_y_m * 100.0
+            height_z_cm = height_z_m * 100.0
 
             # 2. Surface Area and Volume Calculations
             surface_area_m2 = 0.0
@@ -249,23 +249,27 @@ if uploaded_file is not None:
         with col_metrics:
             st.subheader("📐 Model Dimensions")
             dim_col1, dim_col2, dim_col3 = st.columns(3)
-            dim_col1.metric("Width (X)", f"{width_x_mm:.2f} mm", f"{width_x_m:.4f} m")
-            dim_col2.metric("Length (Y)", f"{length_y_mm:.2f} mm", f"{length_y_m:.4f} m")
-            dim_col3.metric("Height (Z)", f"{height_z_mm:.2f} mm", f"{height_z_m:.4f} m")
+            # แสดงค่าหลักเป็น m และค่ารองเป็น cm
+            dim_col1.metric("Width (X)", f"{width_x_m:.3f} m", f"{width_x_cm:.1f} cm")
+            dim_col2.metric("Length (Y)", f"{length_y_m:.3f} m", f"{length_y_cm:.1f} cm")
+            dim_col3.metric("Height (Z)", f"{height_z_m:.3f} m", f"{height_z_cm:.1f} cm")
+
+            # เช็กข้อจำกัดของโรงงาน (น้อยกว่า 10 cm / 0.1 m)
+            min_dimension_m = min(width_x_m, length_y_m, height_z_m)
+            if min_dimension_m < 0.10:
+                st.warning(f"⚠️ **Notice:** Model has dimensions smaller than 10 cm ({min_dimension_m*100:.1f} cm). Please verify factory manufacturing limits.")
 
             st.markdown("---")
 
-            # Display Surface Area (หลักเป็น sq.m) & Volume
             st.subheader("📊 Surface Area & Volume")
             res_a, res_b = st.columns(2)
             
-            # ปรับให้ค่าหลักแสดงหน่วย sq.m และค่ารองแสดง sq.cm
-            res_a.metric("Total Surface Area", f"{surface_area_m2:.6f} sq.m", f"{surface_area_cm2:,.2f} sq.cm")
+            res_a.metric("Total Surface Area", f"{surface_area_m2:.4f} sq.m", f"{surface_area_cm2:,.1f} sq.cm")
             
             if is_watertight:
-                res_b.metric("Volume (Exact)", f"{volume_m3:.6f} cu.m", f"{volume_cm3:,.2f} cu.cm")
+                res_b.metric("Volume (Exact)", f"{volume_m3:.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
             elif used_convex_hull and volume_m3 > 0:
-                res_b.metric("Volume (Convex Hull)", f"{volume_m3:.6f} cu.m", f"{volume_cm3:,.2f} cu.cm")
+                res_b.metric("Volume (Convex Hull)", f"{volume_m3:.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
                 st.info("💡 **Note:** Model is non-watertight or Point Cloud. Volume calculated using Convex Hull approximation.")
             else:
                 res_b.info("Model mesh is non-watertight and volume couldn't be calculated.")
