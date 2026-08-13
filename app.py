@@ -13,18 +13,25 @@ st.set_page_config(page_title="3D Model Analyzer", page_icon="📦", layout="wid
 st.title("📦 3D Model Dimension & Surface Area Analyzer")
 st.write("Upload a 3D model file to automatically extract bounding box dimensions, surface area, and volume.")
 
-# Sidebar for Model Unit Selection (ปรับ Default เป็น Meters ให้เหมาะกับสเกลโรงงาน)
+# Sidebar for Model Unit Selection (เพิ่มตัวเลือก Decimeters / 10 cm)
 st.sidebar.header("⚙️ Unit Settings")
 unit_input = st.sidebar.selectbox(
     "Select Model File Unit",
-    options=["Meters (m)", "Centimeters (cm)", "Millimeters (mm)"],
-    index=0,  # Default เป็น Meters (m)
+    options=[
+        "Meters (m)", 
+        "Decimeters / 10 cm (dm)", 
+        "Centimeters (cm)", 
+        "Millimeters (mm)"
+    ],
+    index=0,
     help="3D formats (OBJ, STL, PLY) store raw numbers without units. Select the unit used when creating the model."
 )
 
 # Scaling Factor to standard Meters
 if unit_input == "Meters (m)":
     scale_to_m = 1.0
+elif unit_input == "Decimeters / 10 cm (dm)":
+    scale_to_m = 0.1  # แปลงสเกล 14.172 ให้กลายเป็น 1.417 m
 elif unit_input == "Centimeters (cm)":
     scale_to_m = 0.01
 else:  # Millimeters (mm)
@@ -249,7 +256,6 @@ if uploaded_file is not None:
         with col_metrics:
             st.subheader("📐 Model Dimensions")
             dim_col1, dim_col2, dim_col3 = st.columns(3)
-            # แสดงค่าหลักเป็น m และค่ารองเป็น cm
             dim_col1.metric("Width (X)", f"{width_x_m:.3f} m", f"{width_x_cm:.1f} cm")
             dim_col2.metric("Length (Y)", f"{length_y_m:.3f} m", f"{length_y_cm:.1f} cm")
             dim_col3.metric("Height (Z)", f"{height_z_m:.3f} m", f"{height_z_cm:.1f} cm")
