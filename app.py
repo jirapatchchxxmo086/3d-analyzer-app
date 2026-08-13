@@ -120,30 +120,44 @@ def analyze_complexity(mesh, is_point_cloud):
       or self-intersecting meshes may give noisy results.
     """
     if is_point_cloud or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
-        return None
+        return {"score": None, "level": None,
+                "error": "ไฟล์นี้เป็น point cloud (มีแต่จุด ไม่มีข้อมูลหน้า/face) จึงไม่มีพื้นผิวให้วิเคราะห์"}
+
+    if len(mesh.faces) == 0:
+        return {"score": None, "level": None,
+                "error": "mesh นี้ไม่มีข้อมูลหน้า (faces) แม้จะมีจุด (vertices) อยู่ก็ตาม"}
 
     area = mesh.area
     if area <= 0:
-        return None
+        return {"score": None, "level": None, "error": "พื้นที่ผิวรวมคำนวณได้เท่ากับ 0"}
 
+    # --- Signal 1: area excess ratio — compute independently, don't let it
+    #     block signal 2 if it fails ---
+    area_ratio = None
+    area_error = None
     try:
         hull = mesh.convex_hull
         hull_area = hull.area
-    except Exception:
-        return None
+        if hull_area > 0:
+            area_ratio = float(area / hull_area)
+        else:
+            area_error = "พื้นที่ผิวของ convex hull เท่ากับ 0"
+    except Exception as e:
+        # สาเหตุที่พบบ่อย: ไม่ได้ติดตั้ง scipy (trimesh ต้องใช้คำนวณ convex hull)
+        area_error = f"คำนวณ convex hull ไม่สำเร็จ: {e}"
 
-    if hull_area <= 0:
-        return None
-
-    # 1) Area excess ratio — how much more surface than its own smooth envelope
-    area_ratio = float(area / hull_area)
-
-    # 2) Total curvature ratio — how much bending/folding the surface has overall
+    # --- Signal 2: total curvature ratio — also independent ---
+    curvature_ratio = None
+    curvature_error = None
     try:
         total_abs_curvature = float(np.sum(np.abs(mesh.vertex_defects)))
         curvature_ratio = total_abs_curvature / (4.0 * np.pi)
-    except Exception:
-        curvature_ratio = None
+    except Exception as e:
+        curvature_error = f"คำนวณ curvature (vertex_defects) ไม่สำเร็จ: {e}"
+
+    if area_ratio is None and curvature_ratio is None:
+        combined_error = " | ".join(filter(None, [area_error, curvature_error]))
+        return {"score": None, "level": None, "error": combined_error or "ไม่ทราบสาเหตุ"}
 
     # --- Map open-ended ratios (>= ~1.0) onto a saturating 0-100% score ---
     # Tune these two constants against real samples (see calibration note above).
@@ -153,15 +167,13 @@ def analyze_complexity(mesh, is_point_cloud):
     def _ratio_to_pct(ratio, k):
         return float(np.clip(1 - np.exp(-k * max(ratio - 1.0, 0.0)), 0.0, 1.0)) * 100
 
-    area_component = _ratio_to_pct(area_ratio, AREA_RATIO_K)
-
+    components = []
+    if area_ratio is not None:
+        components.append(_ratio_to_pct(area_ratio, AREA_RATIO_K))
     if curvature_ratio is not None:
-        curvature_component = _ratio_to_pct(curvature_ratio, CURVATURE_RATIO_K)
-        detail_score = round(0.5 * area_component + 0.5 * curvature_component, 1)
-    else:
-        # curvature signal unavailable (messy mesh) — fall back to area ratio alone
-        curvature_component = None
-        detail_score = round(area_component, 1)
+        components.append(_ratio_to_pct(curvature_ratio, CURVATURE_RATIO_K))
+
+    detail_score = round(sum(components) / len(components), 1)
 
     if detail_score < 15:
         level = "เรียบง่าย (Simple)"
@@ -175,8 +187,10 @@ def analyze_complexity(mesh, is_point_cloud):
     return {
         "score": detail_score,
         "level": level,
-        "area_ratio": round(area_ratio, 3),
+        "area_ratio": round(area_ratio, 3) if area_ratio is not None else None,
         "curvature_ratio": round(curvature_ratio, 3) if curvature_ratio is not None else None,
+        "area_error": area_error,
+        "curvature_error": curvature_error,
     }
 
 
@@ -395,15 +409,18 @@ if uploaded_file is not None:
             # NEW: Complexity / detail-level section
             st.markdown("---")
             st.subheader("🔍 Shape Complexity / Detail Level")
-            if complexity:
+            if complexity and complexity.get("score") is not None:
                 st.metric("Estimated Detail Level", complexity["level"], f"{complexity['score']}%")
                 st.progress(complexity["score"] / 100)
                 with st.expander("ตัวชี้วัดที่ใช้คำนวณ (สำหรับผู้ที่สนใจรายละเอียด)"):
-                    st.write(f"- **Area excess ratio** (พื้นที่ผิวจริง ÷ พื้นที่ผิว convex hull): {complexity['area_ratio']} — 1.0 คือผิวเรียบเนียนเท่าเปลือกห่อภายนอกพอดี ยิ่งสูงยิ่งมีริ้ว/รอยพับ/รายละเอียดเยอะ")
+                    if complexity['area_ratio'] is not None:
+                        st.write(f"- **Area excess ratio** (พื้นที่ผิวจริง ÷ พื้นที่ผิว convex hull): {complexity['area_ratio']} — 1.0 คือผิวเรียบเนียนเท่าเปลือกห่อภายนอกพอดี ยิ่งสูงยิ่งมีริ้ว/รอยพับ/รายละเอียดเยอะ")
+                    else:
+                        st.write(f"- **Area excess ratio**: คำนวณไม่ได้ ({complexity.get('area_error')})")
                     if complexity['curvature_ratio'] is not None:
                         st.write(f"- **Total curvature ratio** (ความโค้ง/สันรวมทั้งผิว ÷ ค่าฐานของทรงนูนเรียบ): {complexity['curvature_ratio']} — ยิ่งสูงยิ่งมีมุมแหลม/สัน/หลุมสลับกันเยอะ")
                     else:
-                        st.write("- **Total curvature ratio**: คำนวณไม่ได้ (mesh อาจไม่สมบูรณ์) — ใช้เฉพาะ area excess ratio แทน")
+                        st.write(f"- **Total curvature ratio**: คำนวณไม่ได้ ({complexity.get('curvature_error')})")
                     st.caption(
                         "หมายเหตุ: ตัวเลขนี้คำนวณจากรูปทรงพื้นผิวล้วนๆ ไม่ใช้ปริมาตรเลย จึงใช้ได้แม้ไฟล์ไม่ปิดสนิท (non-watertight) "
                         "แต่ยังเป็นตัวชี้วัดเชิงเรขาคณิต ไม่ใช่การวัด 'ความประณีตของฝีมือ' โดยตรง "
@@ -411,7 +428,10 @@ if uploaded_file is not None:
                         "— แนะนำให้ลองปรับค่า AREA_RATIO_K / CURVATURE_RATIO_K ในโค้ดให้เข้ากับชิ้นงานจริงของธุรกิจก่อนใช้ตัดสินราคา"
                     )
             else:
-                st.info("ไม่สามารถวิเคราะห์ระดับความซับซ้อนของโมเดลนี้ได้ (ไฟล์อาจเป็น point cloud หรือ mesh ว่างเปล่า)")
+                error_msg = complexity.get("error") if complexity else "ไม่ทราบสาเหตุ"
+                st.warning(f"⚠️ ไม่สามารถวิเคราะห์ระดับความซับซ้อนของโมเดลนี้ได้\n\nสาเหตุ: {error_msg}")
+                if error_msg and "scipy" in error_msg.lower():
+                    st.info("💡 ลองรัน `pip install scipy` แล้วรีสตาร์ทแอปใหม่ — trimesh ต้องใช้ scipy ในการคำนวณ convex hull")
 
     except Exception as e:
         st.error(f"An error occurred while processing the file: {str(e)}")
