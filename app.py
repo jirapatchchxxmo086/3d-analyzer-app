@@ -29,6 +29,10 @@ if "height_z_mm" not in st.session_state:
 if "file_name" not in st.session_state:
     st.session_state["file_name"] = "ยังไม่ได้เลือกไฟล์"
 
+# List สำหรับเก็บบันทึกรายการวัสดุที่เลือกในหน้า 2
+if "selected_materials" not in st.session_state:
+    st.session_state["selected_materials"] = []
+
 # ==========================================
 # 🧭 3. Sidebar Navigation
 # ==========================================
@@ -43,7 +47,7 @@ st.sidebar.divider()
 # ==========================================
 # 📦 หน้า 1: วิเคราะห์โมเดล 3D (คงโค้ดเดิมไว้ 100%)
 # ==========================================
-if page == "📦 หน้า 1: วิเคราะห์โมเดล 3D & พื้นที่ผิว":
+if page == "📦 3D Model Dimension & Surface Area Analyzer":
     st.title("📦 3D Model Dimension & Surface Area Analyzer")
     st.write("Upload a 3D model file to automatically extract bounding box dimensions, surface area, volume, and surface detail complexity.")
 
@@ -418,15 +422,185 @@ if page == "📦 หน้า 1: วิเคราะห์โมเดล 3D &
                 os.remove(tmp_path)
 
 # ==========================================
-# 💰 หน้าที่ 2: คำนวณราคา (ปรับปรุงการรวมวัสดุอื่นๆ)
+# 💰 หน้าที่ 2: คำนวณราคา (ปรับปรุงฟังก์ชันเลือกวัสดุสมบูรณ์แบบ)
 # ==========================================
-elif page == "💰 หน้าที่ 2: คำนวณราคา & ใบประเมิน":
-    st.title("💰 หน้าที่ 2: คำนวณต้นทุนและออกใบประเมินราคา")
-    st.caption("ระบบดึงข้อมูลพื้นที่ผิวจากหน้าแรกมาประมวลผลร่วมกับสูตรคำนวณ Robot และ Master Data")
+elif page == "Estimate price & Quotation":
+    st.title("Costing & Cost Estimate")
+    st.caption("ระบบดึงข้อมูลพื้นที่ผิวจากหน้าแรกมาประมวลผลร่วมกับสูตรคำนวณ Robot และ Material Master Data")
 
     st.info(f"📌 **ข้อมูลโมเดลปัจจุบันจากหน้าแรก:** ไฟล์ `{st.session_state['file_name']}` | ขนาด `{st.session_state['dimensions_str']}` mm | พื้นที่ผิว `{st.session_state['surface_area_sqm']:.3f}` ตร.ม.")
 
-    # Master Data Rates
+    # ------------------------------------------
+    # 🗂️ ฐานข้อมูลวัสดุ (Material Master Data)
+    # Structure: {"หมวดหมู่": {"ชื่อวัสดุ": {"price": ราคาขาย, "cost": ต้นทุน}}}
+    # ------------------------------------------
+    MATERIAL_MASTER_DB = {
+        "หมวด Foam": {
+            "Foam 0.8 lb.": {"price": 2300, "cost": 2300},
+            "Foam 1.0 lb.": {"price": 2850, "cost": 2850},
+            "Foam 1.25 lb.": {"price": 3550, "cost": 3550},
+            "Foam 1.5 lb.": {"price": 4100, "cost": 4100},
+            "Foam 2.0 lb.": {"price": 6000, "cost": 6000},
+            "Foam eva 50 มม.": {"price": 2520, "cost": 2100},
+            "EVA แผ่น 30 มม.": {"price": 1440, "cost": 1200},
+            "EVA แผ่นหนา 7mm": {"price": 13200, "cost": 11000},
+        },
+        "หมวด 3D Print / Resin": {
+            "PLA Gray": {"price": 600, "cost": 500},
+            "Resin Gray": {"price": 1200, "cost": 1000},
+            "Resin ( 1000 / 1 sq.m. )": {"price": 1200, "cost": 1000},
+            "เรซินใสหล่อพิเศษ 1kg": {"price": 350, "cost": 290},
+            "เรซินใสหล่อพิเศษ 5kg": {"price": 960, "cost": 800},
+            "Crystal resin": {"price": 1700, "cost": 1415},
+        },
+        "หมวด อะคริลิค (Acrylic)": {
+            "อะคริลิคใส 1.5 3*6 ฟุต": {"price": 576, "cost": 480},
+            "อะคริลิคใส 3 มม.": {"price": 2160, "cost": 1800},
+            "Acrylic ใส 5 มม.": {"price": 3000, "cost": 2500},
+            "Acrylic ใส 10 มม.": {"price": 5760, "cost": 4800},
+            "Acrylic 2 mm.": {"price": 1440, "cost": 1200},
+            "อะคริลิคขาว 5 มม.": {"price": 3000, "cost": 2500},
+            "Acrylic 10 mm.": {"price": 5760, "cost": 4800},
+            "Acrylic mirror 2 mm.": {"price": 2400, "cost": 2000},
+            "อะคริลิค 25 มม.": {"price": 8640, "cost": 7200},
+            "อะคริลิคแท่งใส 10 มม. 1.2 ม.": {"price": 456, "cost": 380},
+            "แผ่นอะคริลิค 1 มม.": {"price": 450, "cost": 450},
+            "แผ่นอะคริลิค 1.5 มม.": {"price": 750, "cost": 750},
+            "แผ่นอะคริลิค 3 มม.": {"price": 1350, "cost": 1350},
+            "แผ่นอะคริลิค 4 มม.": {"price": 2220, "cost": 1850},
+            "แผ่นอะครีลิค 6 มม.": {"price": 6240, "cost": 5200},
+            "แผ่นอะคลิลิกใส 5mm": {"price": 5000, "cost": 4160},
+            "อะคริลิค 12 มม.": {"price": 5712, "cost": 4760},
+        },
+        "หมวด ไม้ / MDF / HMR / พลาสวูด": {
+            "MDF 6 mm.": {"price": 300, "cost": 250},
+            "MDF 10 mm.": {"price": 360, "cost": 300},
+            "MDF 12 mm.": {"price": 420, "cost": 350},
+            "MDF 15 mm.": {"price": 540, "cost": 450},
+            "MDF 18 mm.": {"price": 660, "cost": 550},
+            "MDF 25 mm.": {"price": 900, "cost": 750},
+            "HMR 4 mm.": {"price": 255, "cost": 255},
+            "HMR 6 mm.": {"price": 350, "cost": 350},
+            "HMR 9 mm.": {"price": 475, "cost": 475},
+            "Hmr 12 mm.": {"price": 635, "cost": 635},
+            "Hmr 15 mm.": {"price": 780, "cost": 780},
+            "Hmr 18 mm.": {"price": 910, "cost": 910},
+            "HMR 25 mm.": {"price": 1150, "cost": 1150},
+            "HMR Laminate 15 mm.": {"price": 2160, "cost": 1800},
+            "HMR Laminate 18 mm.": {"price": 2400, "cost": 2000},
+            "ไม้อัด 3 มม.": {"price": 180, "cost": 150},
+            "ไม้อัด 6 มม.": {"price": 360, "cost": 300},
+            "ไม้อัด 12 มม": {"price": 456, "cost": 380},
+            "ไม้อัด 20 มม.": {"price": 1200, "cost": 1000},
+            "ไม้อัดดัดโค้ง 6 มม.": {"price": 1080, "cost": 900},
+            "ไม้อัดดัดโค้ง 10 มม.": {"price": 1308, "cost": 1090},
+            "ไม้อัดยางมารีน 20mm": {"price": 4000, "cost": 3330},
+            "ไม้จอยส์ ( 10 เส้น )": {"price": 320, "cost": 320},
+            "ไม้โครง": {"price": 120, "cost": 100},
+            "ไม้โอ๊ค veneer": {"price": 4000, "cost": 5600},
+            "Plastwood 3 mm.": {"price": 420, "cost": 350},
+            "Plastwood 4 mm.": {"price": 480, "cost": 400},
+            "Plastwood 6 mm.": {"price": 660, "cost": 550},
+            "Plastwood 10 mm.": {"price": 1440, "cost": 1200},
+            "Plastwood 15 mm.": {"price": 1800, "cost": 1500},
+            "Plastwood 20 mm.": {"price": 2400, "cost": 2000},
+            "Plastwood 25 mm.": {"price": 3000, "cost": 2500},
+        },
+        "หมวด เหล็ก / สแตนเลส / โลหะ": {
+            "เหล็กแผ่น 1 มม.": {"price": 850, "cost": 850},
+            "เหล็กแผ่น 1.2 มม.": {"price": 1200, "cost": 1000},
+            "เหล็กแผ่น 1.5 มม.": {"price": 1440, "cost": 1200},
+            "เหล็กแผ่น 1.5 มม. 5*8": {"price": 2880, "cost": 2400},
+            "เหล็กแผ่น 2 มม.": {"price": 1050, "cost": 1050},
+            "เหล็กแผ่น 2.5 มม.": {"price": 2160, "cost": 1800},
+            "เหล็กแผ่น 3 มม.": {"price": 2520, "cost": 2100},
+            "เหล็กแผ่น 4 มม.": {"price": 3240, "cost": 2700},
+            "เหล็กแผ่น 6 มม.": {"price": 3750, "cost": 3750},
+            "เหล็กแผ่น 8 มม.": {"price": 6240, "cost": 5200},
+            "เหล็กแผ่น 10 มม.": {"price": 5795, "cost": 5795},
+            "เหล็กแผ่น 12 มม.": {"price": 6950, "cost": 6950},
+            "เหล็กเส้น 4 มม. 1300": {"price": 100, "cost": 100},
+            "เหล็กเส้น 10มม. 10ม.": {"price": 240, "cost": 200},
+            "เหล็กกล่อง 1.25\" ( 32 มม.)": {"price": 600, "cost": 500},
+            "เหล็กกล่อง 2*3 นิ้ว": {"price": 1200, "cost": 1000},
+            "เหล็กท่อกลม 2 นิ้ว": {"price": 600, "cost": 500},
+            "เหล็กท่อกลม 8 มม.": {"price": 120, "cost": 100},
+            "เหล็กท่อกลม 6 นิ้ว": {"price": 1800, "cost": 1800},
+            "เหล็กท่อกลม 20mm": {"price": 480, "cost": 400},
+            "ท่อเหล็ก 1 นิ้ว": {"price": 216, "cost": 180},
+            "ท่อเหล็ก 90 มม.": {"price": 5400, "cost": 4500},
+            "ท่อเหล็ก 100 มม.": {"price": 6240, "cost": 5200},
+            "เหล็กกลม 25mm ดัดโค้ง 2ชิ้น 1 ชุด": {"price": 4500, "cost": 3750},
+            "เหล็กกลม 25mm ดัดโค้ง 2ชิ้น 10 ชุด": {"price": 4300, "cost": 3580},
+            "เหล็กกลม 25mm ดัดโค้ง 2ชิ้น 20 ชุด": {"price": 4000, "cost": 3330},
+            "Stainless แท่ง 10 มม. 1 ม.": {"price": 180, "cost": 150},
+            "เพลาสแตนเลส 1/4 นิ้ว ( 6.35 มม. )": {"price": 270, "cost": 225},
+            "เพลาสแตนเลส 3/16 นิ้ว ( 4.762 มม. )": {"price": 156, "cost": 130},
+            "ท่อStainless 0.5 นิ้ว": {"price": 1800, "cost": 1500},
+            "ท่อStainless 1 นิ้ว": {"price": 3000, "cost": 2500},
+            "ท่อStainless 1.5 นิ้ว": {"price": 4200, "cost": 3500},
+            "ท่อStainless 2 นิ้ว": {"price": 5400, "cost": 4500},
+        },
+        "หมวด แผ่นพลาสติก / พีวีซี / กระดาษ": {
+            "แผ่น PVC": {"price": 70, "cost": 70},
+            "แผ่น PVC ใส 5 มม.": {"price": 4200, "cost": 3500},
+            "แผ่น PET 0.5 มม.": {"price": 65, "cost": 65},
+            "แผ่น PET 1 มม.": {"price": 105, "cost": 105},
+            "แผ่น PP": {"price": 100, "cost": 100},
+            "แผ่นกระดาษ": {"price": 70, "cost": 70},
+        },
+        "หมวด สี / สารเคมี / งานปิดผิว": {
+            "สีทากระดานดำ": {"price": 250, "cost": 200},
+            "สีทองกลิตเตอร์ 1 ลิตร": {"price": 1440, "cost": 1200},
+            "ตัวเคลือบ 2K 168 -3ลิตร": {"price": 3360, "cost": 2800},
+            "Epoxy + PU Coating กันสนิม": {"price": 500, "cost": 415},
+            "Walltex TOA 1 ถัง": {"price": 2148, "cost": 1790},
+            "Texture ( 26A )": {"price": 340, "cost": 280},
+            "ลามิเนตลายหินอ่อน": {"price": 1500, "cost": 1250},
+            "Interior film ลายหินอ่อน 1*1 m.": {"price": 480, "cost": 400},
+            "แผ่นปิดทอง ( 1 ตร.ม. )": {"price": 168, "cost": 140},
+        },
+        "หมวด ระบบไฟ / อุปกรณ์ไฟฟ้า": {
+            "Strip light ( 1 m. )": {"price": 132, "cost": 110},
+            "Strip light 4500k ( 1m. )": {"price": 600, "cost": 500},
+            "Strip light 3000k ( 1m.)": {"price": 420, "cost": 350},
+            "หม้อแปลง strip light": {"price": 1500, "cost": 1500},
+            "Neon flex 12V ( 1 m.)": {"price": 180, "cost": 150},
+            "Track light 4000K": {"price": 1800, "cost": 1500},
+            "หลอดไฟกลม E27 Warm": {"price": 180, "cost": 150},
+            "Light box 1 set": {"price": 5500, "cost": 4580},
+            "Light box 10 set": {"price": 4500, "cost": 3750},
+            "Light box 20 set": {"price": 4000, "cost": 3330},
+        },
+        "หมวด ฟิตติ้ง / อุปกรณ์ตกแต่ง / อื่นๆ": {
+            "กระจก ( 5000 / 1 sq.m. )": {"price": 6000, "cost": 5000},
+            "ท่อ PVC 25mm. 2.9 m.": {"price": 84, "cost": 70},
+            "ท่อ pvc 1นิ้ว": {"price": 180, "cost": 150},
+            "ข้อต่อเกรียวใน 1.5 นิ้ว": {"price": 120, "cost": 100},
+            "เกรียวนอก 36 มม. 1ม.": {"price": 1200, "cost": 1000},
+            "เชือกฟาง": {"price": 240, "cost": 200},
+            "ชุดเข็มนาฬิกา": {"price": 300, "cost": 250},
+            "แม่เหล็ก": {"price": 90, "cost": 75},
+            "แม่เหล็ก ( 5*15*150 )": {"price": 300, "cost": 250},
+            "ผ้าม่าน ( 1 ตร.ม. )": {"price": 1800, "cost": 1500},
+            "สลิง 6 มม. ( 1 เมตร )": {"price": 120, "cost": 100},
+            "หญ้าเทียม 50 sq.m.": {"price": 9600, "cost": 8000},
+            "หญ้าเทียม 1 sq.m.": {"price": 192, "cost": 160},
+            "Mechanic small": {"price": 36000, "cost": 30000},
+            "Mechanic Large": {"price": 120000, "cost": 100000},
+            "บานพับ": {"price": 360, "cost": 300},
+            "บานพับแสตนเลส": {"price": 200, "cost": 165},
+            "ผ้า canvas 1 เมตร": {"price": 216, "cost": 180},
+            "ผ้า 210T": {"price": 120, "cost": 100},
+            "ล้อ": {"price": 240, "cost": 200},
+            "Cement board 12 มม.": {"price": 720, "cost": 600},
+            "ยางกันลื่น 3มม. (1.2*1ม.)": {"price": 720, "cost": 600},
+            "ทุ่งดอกหญ้า 1 ตร.ม.": {"price": 120, "cost": 100},
+            "มือจับฝัง": {"price": 200, "cost": 165},
+            "ลวดดัดโครง 4mm": {"price": 240, "cost": 200},
+        }
+    }
+
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
     HARDCOAT_RATES = {"ไม่มี (None)": 0, "Polyurea": 1350, "Mold Fiber": 1520, "Fiberglass (Work)": 1090, "Epoxy": 600}
     COLOR_RATES = {"ไม่มี (None)": 0, "Normal": 1440, "Chromium": 4800, "The Code": 1800, "Gold leaves": 168, "Sticker": 1200}
@@ -445,7 +619,7 @@ elif page == "💰 หน้าที่ 2: คำนวณราคา & ใบ
             step=0.1
         )
 
-    st.markdown("##### ⚙️ เลือกกระบวนการเครื่องจักรและรายการวัสดุ (Operations & Materials)")
+    st.markdown("##### ⚙️ เลือกกระบวนการเครื่องจักร (Operations)")
     c_op1, c_op2, c_op3, c_op4 = st.columns(4)
 
     with c_op1:
@@ -456,7 +630,6 @@ elif page == "💰 หน้าที่ 2: คำนวณราคา & ใบ
         robot_setup = st.number_input("Setup (Hr)", value=0.5, key="r_s")
         auto_robot_mch = calc_area * LEVEL_FACTORS.get(complexity_level, 5.0)
         robot_mch = st.number_input("Machine (Hr)", value=float(auto_robot_mch), key="r_m")
-        robot_mat = st.number_input("ค่าโฟม/โฟมแท่ง (฿)", value=2850)
 
     with c_op2:
         st.markdown("**2. 3D Print FDM**")
@@ -465,12 +638,10 @@ elif page == "💰 หน้าที่ 2: คำนวณราคา & ใบ
         fdm_prog = st.number_input("Program (Hr)", value=0.5, key="f_p")
         fdm_setup = st.number_input("Setup (Hr)", value=0.5, key="f_s")
         fdm_mch = st.number_input("Machine (Hr)", value=17.0, key="f_m")
-        fdm_mat = st.number_input("ค่าเส้นพลาสติก (฿)", value=480)
 
     with c_op3:
         st.markdown("**3. Structure & Assembly**")
         use_struct = st.checkbox("งานโครงสร้าง", value=False)
-        struct_mat = st.number_input("ค่าเหล็ก/โครงสร้าง (฿)", value=720)
 
     with c_op4:
         st.markdown("**4. Fiber Laser N2**")
@@ -479,33 +650,87 @@ elif page == "💰 หน้าที่ 2: คำนวณราคา & ใบ
         laser_prog = st.number_input("Program (Hr)", value=0.5, key="l_p")
         laser_setup = st.number_input("Setup (Hr)", value=0.5, key="l_s")
         laser_mch = st.number_input("Machine (Hr)", value=0.5, key="l_m")
-        laser_mat = st.number_input("ค่าแผ่นแผ่นเลเซอร์ (฿)", value=648)
 
-    # 📦 รวมส่วนวัสดุอื่นๆ (ไม้อัดยางมารีน 20mm + อุปกรณ์ประกอบเพิ่มเติม)
+    # ==========================================
+    # 📦 ระบบเลือกวัสดุจาก Master Data
+    # ==========================================
     st.markdown("---")
-    st.markdown("##### 📦 วัสดุอื่นๆ (Other Materials / Plywood)")
-    col_mat_other1, col_mat_other2 = st.columns(2)
-    
-    with col_mat_other1:
-        use_plywood = st.checkbox("ไม้อัดยางมารีน 20mm", value=False)
-        plywood_total = 0.0
-        if use_plywood:
-            plywood_qty = st.number_input("จำนวนแผ่นไม้อัด", min_value=1, value=1)
-            # ปรับส่วนลดกรณีสั่งซื้อขั้นต่ำ ≥ 100 แผ่น
-            if plywood_qty >= 100:
-                plywood_unit_price = 3500
-                st.caption("🎉 ได้รับราคาสั่งซื้อขั้นต่ำ (≥ 100 แผ่น): 3,500 บาท/แผ่น")
-            else:
-                plywood_unit_price = 4000
-                st.caption("ราคาปกติ (< 100 แผ่น): 4,000 บาท/แผ่น")
-            plywood_total = plywood_qty * plywood_unit_price
+    st.markdown("##### 📦 ระบบเลือกรายการวัสดุสำหรับผลิตชิ้นงาน (Material Master Selection)")
 
-    with col_mat_other2:
-        general_mat_cost = st.number_input("ค่าวัสดุและอุปกรณ์อื่นๆ เพิ่มเติม (บาท)", min_value=0.0, value=0.0, step=100.0)
+    with st.expander("➕ คลิกเพื่อเลือกและเพิ่มรายการวัสดุลงในชิ้นงาน", expanded=True):
+        m_col1, m_col2, m_col3, m_col4 = st.columns([1.5, 2, 1, 1])
+        
+        with m_col1:
+            selected_cat = st.selectbox("เลือกหมวดหมู่วัสดุ", list(MATERIAL_MASTER_DB.keys()))
+        
+        with m_col2:
+            materials_in_cat = list(MATERIAL_MASTER_DB[selected_cat].keys())
+            selected_mat_item = st.selectbox("เลือกรายการวัสดุ", materials_in_cat)
+            
+        # ดึงราคาจาก Database
+        unit_price = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
+        unit_cost = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
 
-    # รวมยอดหมวดวัสดุอื่นๆ
-    other_materials_total = plywood_total + general_mat_cost
+        with m_col3:
+            mat_qty = st.number_input("จำนวน / หน่วย", min_value=1.0, value=1.0, step=1.0)
+            st.caption(f"ราคาขาย: ฿{unit_price:,.2f} | ทุน: ฿{unit_cost:,.2f}")
 
+        with m_col4:
+            st.write(" ")
+            st.write(" ")
+            if st.button("➕ เพิ่มวัสดุ", use_container_width=True):
+                # ตรวจสอบส่วนลดพิเศษสำหรับไม้อัดยางมารีน 20mm
+                final_price = unit_price
+                final_cost = unit_cost
+                if selected_mat_item == "ไม้อัดยางมารีน 20mm" and mat_qty >= 100:
+                    final_price = 3500.0
+                    st.toast("🎉 ปรับราคาไม้อัดยางมารีน 20mm เป็นราคาโปรโมชั่น 3,500 บาท/แผ่น")
+
+                new_item = {
+                    "cat": selected_cat,
+                    "name": selected_mat_item,
+                    "qty": mat_qty,
+                    "unit_price": final_price,
+                    "unit_cost": final_cost,
+                    "total_price": final_price * mat_qty,
+                    "total_cost": final_cost * mat_qty
+                }
+                st.session_state["selected_materials"].append(new_item)
+                st.success(f"เพิ่ม {selected_mat_item} เรียบร้อย!")
+
+    # แสดงตารางรายการวัสดุที่เลือก
+    total_material_cost_val = 0.0
+    total_material_price_val = 0.0
+
+    if st.session_state["selected_materials"]:
+        st.markdown("**ตารางรายการวัสดุที่เลือกใช้ในโครงการ:**")
+        
+        mat_table_data = []
+        for idx, item in enumerate(st.session_state["selected_materials"]):
+            mat_table_data.append({
+                "ลำดับ": idx + 1,
+                "หมวดหมู่": item["cat"],
+                "รายการวัสดุ": item["name"],
+                "จำนวน": item["qty"],
+                "ราคาต่อหน่วย (บาท)": f"฿{item['unit_price']:,.2f}",
+                "ราคารวมขาย (บาท)": f"฿{item['total_price']:,.2f}",
+                "ต้นทุนรวม (บาท)": f"฿{item['total_cost']:,.2f}"
+            })
+            total_material_price_val += item["total_price"]
+            total_material_cost_val += item["total_cost"]
+
+        st.dataframe(pd.DataFrame(mat_table_data), use_container_width=True)
+
+        c_del1, c_del2 = st.columns([1, 4])
+        with c_del1:
+            if st.button("🗑️ ล้างรายการวัสดุทั้งหมด"):
+                st.session_state["selected_materials"] = []
+                st.rerun()
+    else:
+        st.info("💡 ยังไม่ได้เลือกวัสดุเพิ่มเติม โปรดเลือกหมวดหมู่และเพิ่มรายการวัสดุด้านบน")
+
+    # งานเคลือบผิวและทำสี
+    st.markdown("---")
     st.markdown("##### 🎨 งานเคลือบผิวและทำสี (Hard Coat & Finishing)")
     c_coat1, c_coat2 = st.columns(2)
     with c_coat1:
@@ -520,21 +745,18 @@ elif page == "💰 หน้าที่ 2: คำนวณราคา & ใบ
     # ==========================================
     r_time = (robot_prog + robot_setup + robot_mch) if use_robot else 0
     r_mch_cost = r_time * robot_rate if use_robot else 0
-    r_mat_cost = robot_mat if use_robot else 0
 
     f_time = (fdm_prog + fdm_setup + fdm_mch) if use_fdm else 0
     f_mch_cost = f_time * fdm_rate if use_fdm else 0
-    f_mat_cost = fdm_mat if use_fdm else 0
-
-    s_mat_cost = struct_mat if use_struct else 0
 
     l_time = (laser_prog + laser_setup + laser_mch) if use_laser else 0
     l_mch_cost = l_time * laser_rate if use_laser else 0
-    l_mat_cost = laser_mat if use_laser else 0
 
     # ยอดรวมค่าเครื่องจักร และ วัสดุทั้งหมด
     total_mch_cost = r_mch_cost + f_mch_cost + l_mch_cost
-    total_mat_cost = r_mat_cost + f_mat_cost + s_mat_cost + l_mat_cost + other_materials_total
+    
+    # รวมค่าวัสดุทั้งหมดจากตาราง Material Master
+    total_mat_cost = total_material_price_val
     prototype_cost = total_mch_cost + total_mat_cost
 
     hardcoat_cost = calc_area * HARDCOAT_RATES[sel_hardcoat]
@@ -550,25 +772,25 @@ elif page == "💰 หน้าที่ 2: คำนวณราคา & ใบ
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("ชั่วโมง Robot รวม", f"{r_time:.1f} ชม.")
     m2.metric("ค่าเครื่องจักรรวม", f"฿{total_mch_cost:,.2f}")
-    m3.metric("ค่าวัสดุทั้งหมด", f"฿{total_mat_cost:,.2f}")
+    m3.metric("ค่าวัสดุทั้งหมด", f"฿{total_mat_cost:,.2f}", f"ต้นทุน ฿{total_material_cost_val:,.2f}")
     m4.metric("💰 ราคาสรุปสุทธิ (Grand Total)", f"฿{grand_total:,.2f}")
 
     df_summary = pd.DataFrame({
-        "หมวดหมู่กระบวนการ / วัสดุ": [
+        "Operation and Material": [
             "1. Robot Milling", 
             "2. 3D Print FDM", 
             "3. Structure", 
             "4. Fiber Laser N2", 
-            "5. วัสดุอื่นๆ (ไม้อัดยางมารีน / อื่นๆ)"
+            "5. Total Material Master Data"
         ],
         "เวลารวม (Hr)": [f"{r_time:.1f}", f"{f_time:.1f}", "-", f"{l_time:.1f}", "-"],
         "ค่าเครื่องจักร (Baht)": [f"฿{r_mch_cost:,.2f}", f"฿{f_mch_cost:,.2f}", "฿0.00", f"฿{l_mch_cost:,.2f}", "฿0.00"],
-        "ค่าวัสดุ (Baht)": [f"฿{r_mat_cost:,.2f}", f"฿{f_mat_cost:,.2f}", f"฿{s_mat_cost:,.2f}", f"฿{l_mat_cost:,.2f}", f"฿{other_materials_total:,.2f}"]
+        "ค่าวัสดุ (Baht)": ["฿0.00", "฿0.00", "฿0.00", "฿0.00", f"฿{total_mat_cost:,.2f}"]
     })
     st.table(df_summary)
 
     st.markdown(f"""
-    > **งานตกแต่งผิว & สี:**
+    > **Hard Coat:**
     > * **Hard Coat ({sel_hardcoat}):** {calc_area:.2f} sq.m. × ฿{HARDCOAT_RATES[sel_hardcoat]:,} = **฿{hardcoat_cost:,.2f}**
     > * **Color ({sel_color}):** {calc_area:.2f} sq.m. × ฿{COLOR_RATES[sel_color]:,} = **฿{color_cost:,.2f}**
     """)
