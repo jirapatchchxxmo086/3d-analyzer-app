@@ -562,7 +562,7 @@ elif page == t["page_2_name"]:
     ))
 
     # 🗂️ Material Master Data Database
-   MATERIAL_MASTER_DB = {
+    MATERIAL_MASTER_DB = {
     "หมวด Foam": {
         "Foam 0.8 lb.": {"price": 2300, "cost": 2300},
         "Foam 1.0 lb.": {"price": 2850, "cost": 2850},
