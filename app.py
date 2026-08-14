@@ -11,16 +11,16 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="3D Model Analyzer", page_icon="📦", layout="wide")
 
 st.title("📦 3D Model Dimension & Surface Area Analyzer")
-st.write("Upload a 3D model file to automatically extract bounding box dimensions, surface area, and volume.")
+st.write("Upload a 3D model file to automatically extract bounding box dimensions, surface area, volume, and surface detail complexity.")
 
-# Sidebar for Model Unit Selection (เพิ่มตัวเลือก Decimeters / 10 cm)
+# Sidebar for Model Unit Selection
 st.sidebar.header("⚙️ Unit Settings")
 unit_input = st.sidebar.selectbox(
     "Select Model File Unit",
     options=[
-        "Meters (m)",
-        "Decimeters / 10 cm (dm)",
-        "Centimeters (cm)",
+        "Meters (m)", 
+        "Decimeters / 10 cm (dm)", 
+        "Centimeters (cm)", 
         "Millimeters (mm)"
     ],
     index=0,
@@ -31,14 +31,13 @@ unit_input = st.sidebar.selectbox(
 if unit_input == "Meters (m)":
     scale_to_m = 1.0
 elif unit_input == "Decimeters / 10 cm (dm)":
-    scale_to_m = 0.1  # แปลงสเกล 14.172 ให้กลายเป็น 1.417 m
+    scale_to_m = 0.1
 elif unit_input == "Centimeters (cm)":
     scale_to_m = 0.01
 else:  # Millimeters (mm)
     scale_to_m = 0.001
 
 st.sidebar.divider()
-
 
 def process_and_clean_mesh(loaded_data):
     if isinstance(loaded_data, trimesh.Scene):
@@ -74,123 +73,101 @@ def process_and_clean_mesh(loaded_data):
 
     return mesh
 
-
 # ---------------------------------------------------------------------------
-# NEW: Shape complexity / detail-level analysis
+# Surface Area & Detail Complexity Analysis
 # ---------------------------------------------------------------------------
-def analyze_complexity(mesh, is_point_cloud):
+def analyze_surface_complexity(mesh, scale_to_m, is_point_cloud):
     """
-    Estimate how visually/geometrically complex (detailed) a shape is, using
-    ONLY the outer surface geometry — no volume, no watertightness required.
-    This matters because sculpture scans/exports are often not perfectly
-    sealed, which makes volume-based measures unreliable.
-
-    Two signals, each naturally >= 1.0 for a perfectly plain convex shape:
-
-    1) Area excess ratio = mesh.area / convex_hull.area
-       A plain convex blob (egg, smooth stone) scores close to 1.0 — its
-       surface is almost the same as its own outer envelope. A surface full
-       of folds, ridges, or fine texture has much MORE actual surface area
-       than its envelope, so this ratio climbs well above 1.0.
-
-    2) Total curvature ratio = sum(|vertex_defects|) / (4*pi)
-       `vertex_defects` is a standard discrete-geometry measure of how sharp
-       the surface bends at each point (angle deficit vs. a flat 360°).
-       By the Gauss-Bonnet theorem, a smooth convex shape (sphere, egg, even
-       a cube) totals to close to 4*pi regardless of size. Shapes with lots
-       of alternating bumps, creases, and hollows accumulate much more total
-       curvature than that baseline, so the ratio climbs above 1.0.
-
-    Both signals are combined into a single 0-100% "detail score" and
-    bucketed into a human-readable level.
-
-    Calibration note: the ratio-to-percent mapping below (CURVE_STEEPNESS
-    constants) is a reasonable starting guess, not a proven scale. Run this
-    against 5-10 real pieces whose difficulty you already know, and adjust
-    AREA_RATIO_K / CURVATURE_RATIO_K until the scores match your own sense
-    of "simple vs. highly detailed" before using it to price real jobs.
-
-    Limitations (be upfront about these with the business):
-    - These are geometric PROXIES, not a literal measure of artistic effort.
-    - Very fine surface texture only shows up if the mesh was exported at
-      high enough resolution to actually contain that geometry — a
-      decimated/low-poly export of a detailed sculpture will under-score
-      here even though the original artwork is detailed.
-    - `vertex_defects` assumes a reasonably clean, manifold mesh; very messy
-      or self-intersecting meshes may give noisy results.
+    ประเมินระดับความซับซ้อน/รายละเอียดของชิ้นงานโดยพิจารณาจาก "ลักษณะและรายละเอียดของพื้นที่ผิว" (Surface Detail)
     """
     if is_point_cloud or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
-        return {"score": None, "level": None,
-                "error": "ไฟล์นี้เป็น point cloud (มีแต่จุด ไม่มีข้อมูลหน้า/face) จึงไม่มีพื้นผิวให้วิเคราะห์"}
+        return {"score": None, "level": None, "error": "ไฟล์นี้เป็น Point Cloud จึงไม่มีข้อมูลโครงสร้างพื้นผิว (Faces) ให้วิเคราะห์"}
 
     if len(mesh.faces) == 0:
-        return {"score": None, "level": None,
-                "error": "mesh นี้ไม่มีข้อมูลหน้า (faces) แม้จะมีจุด (vertices) อยู่ก็ตาม"}
+        return {"score": None, "level": None, "error": "Mesh ไม่มีข้อมูลหน้า (Faces) สำหรับประเมินพื้นผิว"}
 
-    area = mesh.area
-    if area <= 0:
-        return {"score": None, "level": None, "error": "พื้นที่ผิวรวมคำนวณได้เท่ากับ 0"}
+    area_raw = mesh.area
+    if area_raw <= 0:
+        return {"score": None, "level": None, "error": "พื้นที่ผิวรวมมีค่าเป็น 0"}
 
-    # --- Signal 1: area excess ratio — compute independently, don't let it
-    #     block signal 2 if it fails ---
+    area_m2 = area_raw * (scale_to_m ** 2)
+
+    # 1. Area Fold Ratio (พื้นที่ผิวจริง เทียบกับ พื้นที่ผิวเปลือกห่อหุ้มภายนอก)
     area_ratio = None
     area_error = None
     try:
         hull = mesh.convex_hull
         hull_area = hull.area
         if hull_area > 0:
-            area_ratio = float(area / hull_area)
+            area_ratio = float(area_raw / hull_area)
         else:
-            area_error = "พื้นที่ผิวของ convex hull เท่ากับ 0"
+            area_error = "พื้นที่ผิว Convex Hull เท่ากับ 0"
     except Exception as e:
-        # สาเหตุที่พบบ่อย: ไม่ได้ติดตั้ง scipy (trimesh ต้องใช้คำนวณ convex hull)
-        area_error = f"คำนวณ convex hull ไม่สำเร็จ: {e}"
+        area_error = f"คำนวณ Convex Hull ไม่สำเร็จ: {e}"
 
-    # --- Signal 2: total curvature ratio — also independent ---
-    curvature_ratio = None
-    curvature_error = None
+    # 2. Surface Roughness / Normal Variation (ความผันผวนของทิศทางระนาบผิว)
+    surface_roughness = None
+    roughness_error = None
     try:
-        total_abs_curvature = float(np.sum(np.abs(mesh.vertex_defects)))
-        curvature_ratio = total_abs_curvature / (4.0 * np.pi)
+        # คำนวณความต่างของทิศทาง Face Normals ของระนาบผิวเพื่อนบ้าน (Face Adjacency)
+        face_adjacency = mesh.face_adjacency
+        if len(face_adjacency) > 0:
+            normals = mesh.face_normals
+            n0 = normals[face_adjacency[:, 0]]
+            n1 = normals[face_adjacency[:, 1]]
+            
+            # Dot product ระหว่างระนาบติดกัน -> แปลงเป็นมุม (Radians)
+            dot_products = np.clip(np.sum(n0 * n1, axis=1), -1.0, 1.0)
+            angles_rad = np.arccos(dot_products)
+            
+            # ค่าเฉลี่ยการเปลี่ยนทิศทางของผิว (ยิ่งสูง = ผิวมีความขรุขระ/ลวดลาย/สันซับซ้อน)
+            surface_roughness = float(np.mean(angles_rad))
+        else:
+            surface_roughness = 0.0
     except Exception as e:
-        curvature_error = f"คำนวณ curvature (vertex_defects) ไม่สำเร็จ: {e}"
+        roughness_error = f"คำนวณความผันผวนระนาบผิวไม่สำเร็จ: {e}"
 
-    if area_ratio is None and curvature_ratio is None:
-        combined_error = " | ".join(filter(None, [area_error, curvature_error]))
-        return {"score": None, "level": None, "error": combined_error or "ไม่ทราบสาเหตุ"}
+    # 3. Surface Polygon Density (ความหนาแน่นของ Face ต่อพื้นที่ผิวจริง)
+    face_density_per_m2 = float(len(mesh.faces) / area_m2) if area_m2 > 0 else 0.0
 
-    # --- Map open-ended ratios (>= ~1.0) onto a saturating 0-100% score ---
-    # Tune these two constants against real samples (see calibration note above).
-    AREA_RATIO_K = 1.2       # higher = score climbs faster with area_ratio
-    CURVATURE_RATIO_K = 0.6  # higher = score climbs faster with curvature_ratio
+    # แปลงค่าดัชนีผิวสัมผัสเป็นเปอร์เซ็นต์คะแนนความซับซ้อน (0 - 100%)
+    score_components = []
 
-    def _ratio_to_pct(ratio, k):
-        return float(np.clip(1 - np.exp(-k * max(ratio - 1.0, 0.0)), 0.0, 1.0)) * 100
-
-    components = []
+    # Map Area Ratio (ค่าตั้งแต่ 1.0 ขึ้นไป)
     if area_ratio is not None:
-        components.append(_ratio_to_pct(area_ratio, AREA_RATIO_K))
-    if curvature_ratio is not None:
-        components.append(_ratio_to_pct(curvature_ratio, CURVATURE_RATIO_K))
+        # ยิ่งเกิน 1.0 มาก แสดงว่ามีลวดลายซอกพับบนพื้นผิวมาก
+        s_area = float(np.clip(1 - np.exp(-1.2 * max(area_ratio - 1.0, 0.0)), 0.0, 1.0)) * 100
+        score_components.append(s_area)
 
-    detail_score = round(sum(components) / len(components), 1)
+    # Map Surface Roughness (ค่ามุมเฉลี่ย 0 ถึง pi/2 rad)
+    if surface_roughness is not None:
+        # ค่ามุมเปลี่ยนเกิน ~0.5 rad (ประมาณ 28 องศา) บ่งบอกถึงผิวมีความขรุขระ/รายละเอียดสูง
+        s_rough = float(np.clip(1 - np.exp(-2.5 * surface_roughness), 0.0, 1.0)) * 100
+        score_components.append(s_rough)
 
-    if detail_score < 15:
-        level = "เรียบง่าย (Simple)"
-    elif detail_score < 35:
-        level = "รายละเอียดปานกลาง (Moderate)"
-    elif detail_score < 60:
-        level = "มีรายละเอียดมาก (Detailed)"
+    if not score_components:
+        return {"score": None, "level": None, "error": f"{area_error} | {roughness_error}"}
+
+    detail_score = round(sum(score_components) / len(score_components), 1)
+
+    if detail_score < 20:
+        level = "ผิวเรียบง่าย (Simple Surface)"
+    elif detail_score < 45:
+        level = "ผิวมีรายละเอียดปานกลาง (Moderate Surface)"
+    elif detail_score < 70:
+        level = "ผิวมีรายละเอียดสูง (Detailed Surface)"
     else:
-        level = "รายละเอียดสูงมาก (Highly Detailed)"
+        level = "ผิวมีความซับซ้อน/ลวดลายสูงมาก (Highly Complex Surface)"
 
     return {
         "score": detail_score,
         "level": level,
         "area_ratio": round(area_ratio, 3) if area_ratio is not None else None,
-        "curvature_ratio": round(curvature_ratio, 3) if curvature_ratio is not None else None,
+        "surface_roughness_deg": round(np.degrees(surface_roughness), 2) if surface_roughness is not None else None,
+        "face_density": round(face_density_per_m2, 1),
+        "total_faces": len(mesh.faces),
         "area_error": area_error,
-        "curvature_error": curvature_error,
+        "roughness_error": roughness_error
     }
 
 
@@ -291,7 +268,6 @@ HTML_TEMPLATE = Template("""
 </html>
 """)
 
-
 def render_3d_viewer(mesh_obj):
     try:
         if isinstance(mesh_obj, trimesh.PointCloud) or len(mesh_obj.vertices) == 0:
@@ -324,7 +300,7 @@ if uploaded_file is not None:
 
             is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
-            # 1. Bounding Box Dimensions (เน้นหน่วย Meter และ Centimeter)
+            # 1. Bounding Box Dimensions
             extents_raw = mesh.extents
             width_x_m = extents_raw[0] * scale_to_m
             length_y_m = extents_raw[1] * scale_to_m
@@ -362,8 +338,8 @@ if uploaded_file is not None:
             surface_area_cm2 = surface_area_m2 * 10_000.0
             volume_cm3 = volume_m3 * 1_000_000.0
 
-            # 3. NEW: Complexity / detail-level analysis
-            complexity = analyze_complexity(mesh, is_point_cloud)
+            # 3. Surface Detail Complexity Analysis
+            complexity = analyze_surface_complexity(mesh, scale_to_m, is_point_cloud)
 
         st.success("✅ File processed successfully!")
         st.divider()
@@ -406,32 +382,22 @@ if uploaded_file is not None:
             else:
                 res_b.info("Model mesh is non-watertight and volume couldn't be calculated.")
 
-            # NEW: Complexity / detail-level section
+            # Surface Detail Complexity Display
             st.markdown("---")
-            st.subheader("🔍 Shape Complexity / Detail Level")
+            st.subheader("🔍 Surface Detail Complexity")
             if complexity and complexity.get("score") is not None:
-                st.metric("Estimated Detail Level", complexity["level"], f"{complexity['score']}%")
+                st.metric("Surface Detail Score", complexity["level"], f"{complexity['score']}%")
                 st.progress(complexity["score"] / 100)
-                with st.expander("ตัวชี้วัดที่ใช้คำนวณ (สำหรับผู้ที่สนใจรายละเอียด)"):
+                
+                with st.expander("รายละเอียดตัวชี้วัดพื้นผิว (Surface Metrics)"):
                     if complexity['area_ratio'] is not None:
-                        st.write(f"- **Area excess ratio** (พื้นที่ผิวจริง ÷ พื้นที่ผิว convex hull): {complexity['area_ratio']} — 1.0 คือผิวเรียบเนียนเท่าเปลือกห่อภายนอกพอดี ยิ่งสูงยิ่งมีริ้ว/รอยพับ/รายละเอียดเยอะ")
-                    else:
-                        st.write(f"- **Area excess ratio**: คำนวณไม่ได้ ({complexity.get('area_error')})")
-                    if complexity['curvature_ratio'] is not None:
-                        st.write(f"- **Total curvature ratio** (ความโค้ง/สันรวมทั้งผิว ÷ ค่าฐานของทรงนูนเรียบ): {complexity['curvature_ratio']} — ยิ่งสูงยิ่งมีมุมแหลม/สัน/หลุมสลับกันเยอะ")
-                    else:
-                        st.write(f"- **Total curvature ratio**: คำนวณไม่ได้ ({complexity.get('curvature_error')})")
-                    st.caption(
-                        "หมายเหตุ: ตัวเลขนี้คำนวณจากรูปทรงพื้นผิวล้วนๆ ไม่ใช้ปริมาตรเลย จึงใช้ได้แม้ไฟล์ไม่ปิดสนิท (non-watertight) "
-                        "แต่ยังเป็นตัวชี้วัดเชิงเรขาคณิต ไม่ใช่การวัด 'ความประณีตของฝีมือ' โดยตรง "
-                        "หากไฟล์ถูกลดความละเอียด (decimate) มาก พื้นผิวที่มีลวดลายละเอียดจริงอาจได้คะแนนต่ำกว่าความเป็นจริง "
-                        "— แนะนำให้ลองปรับค่า AREA_RATIO_K / CURVATURE_RATIO_K ในโค้ดให้เข้ากับชิ้นงานจริงของธุรกิจก่อนใช้ตัดสินราคา"
-                    )
+                        st.write(f"- **Surface Area Excess Ratio:** `{complexity['area_ratio']}` (พื้นที่ผิวจริง ÷ พื้นที่ผิวภายนอกเรียบ) — ค่ามากกว่า 1.0 แสดงถึงรอยย่น ลวดลาย หรือซอกรอยพับบนพื้นผิว")
+                    if complexity['surface_roughness_deg'] is not None:
+                        st.write(f"- **Average Surface Normal Deviation:** `{complexity['surface_roughness_deg']}°` — มุมการเปลี่ยนทิศทางเฉลี่ยของระนาบผิวติดกัน ยิ่งสูงแสดงว่าผิวมีสัน/รอยขรุขระผันผวนมาก")
+                    st.write(f"- **Surface Polygon Density:** `{complexity['face_density']:,.0f}` Faces/sq.m (จำนวน Faces ทั้งหมด {complexity['total_faces']:,} ชิ้น)")
             else:
                 error_msg = complexity.get("error") if complexity else "ไม่ทราบสาเหตุ"
-                st.warning(f"⚠️ ไม่สามารถวิเคราะห์ระดับความซับซ้อนของโมเดลนี้ได้\n\nสาเหตุ: {error_msg}")
-                if error_msg and "scipy" in error_msg.lower():
-                    st.info("💡 ลองรัน `pip install scipy` แล้วรีสตาร์ทแอปใหม่ — trimesh ต้องใช้ scipy ในการคำนวณ convex hull")
+                st.warning(f"⚠️ ไม่สามารถวิเคราะห์ระดับความซับซ้อนของพื้นผิวได้\n\nสาเหตุ: {error_msg}")
 
     except Exception as e:
         st.error(f"An error occurred while processing the file: {str(e)}")
