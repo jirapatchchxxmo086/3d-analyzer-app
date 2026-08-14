@@ -1,16 +1,23 @@
 import streamlit as st
 
-# Config หน้าจอ Streamlit
+# Config หน้าจอ
 st.set_page_config(page_title="3D Analyzer & Cost Estimator", layout="wide")
 
 # ==========================================
-# 1. ระบบจัดการภาษา (Language Selector)
+# 1. Session State Initialization
 # ==========================================
 if 'lang' not in st.session_state:
     st.session_state.lang = 'TH'
 
-col_lang1, col_lang2 = st.columns([8, 2])
-with col_lang2:
+if 'added_materials' not in st.session_state:
+    st.session_state.added_materials = []
+
+# ==========================================
+# 2. ระบบจัดการภาษา (Language Selector)
+# ==========================================
+col_title, col_lang = st.columns([8, 2])
+
+with col_lang:
     selected_lang = st.radio(
         "🌐 Language / ภาษา",
         options=["TH", "EN"],
@@ -19,52 +26,90 @@ with col_lang2:
     )
     st.session_state.lang = selected_lang
 
-# พจนานุกรมคำแปล UI
 TRANS = {
     "TH": {
-        "title": "📦 ระบบเลือกรายการวัสดุสำหรับผลิตชิ้นงาน (Material Master Selection)",
+        "main_title": "📐 ระบบประเมินราคาชิ้นงาน 3D & ต้นทุนการผลิต (3D Cost Estimator)",
+        "dim_section": "📏 1. มิติชิ้นงาน ปริมาตร และพื้นที่ผิว (Dimensions & Surface Area)",
+        "length": "ความยาว (Length) - mm",
+        "width": "ความกว้าง (Width) - mm",
+        "height": "ความสูง (Height) - mm",
+        "surface_area": "พื้นที่ผิวรวม (Surface Area) - ตร.ม.",
+        "volume": "ปริมาตร (Volume) - cm³",
+        "labor_section": "⏱️ 2. ชั่วโมงการทำงาน & ค่าแรง (Labor & Machine Hours)",
+        "labor_hrs": "ชั่วโมงทำงานช่าง (Labor Hours)",
+        "labor_rate": "ค่าแรงช่าง (บาท/ชม.)",
+        "machine_hrs": "ชั่วโมงเครื่องจักร (Machine Hours)",
+        "machine_rate": "ค่าบริการเครื่องจักร (บาท/ชม.)",
+        "mat_section": "📦 3. ระบบเลือกรายการวัสดุสำหรับผลิตชิ้นงาน (Material Master Selection)",
         "add_expander": "➕ คลิกเพื่อเลือกและเพิ่มรายการวัสดุลงในชิ้นงาน",
         "cat_label": "เลือกหมวดหมู่วัสดุ",
         "mat_label": "เลือกรายการวัสดุ",
         "qty_label": "จำนวน / หน่วย",
         "add_btn": "➕ เพิ่มวัสดุ",
-        "price": "ราคาขาย",
-        "cost": "ต้นทุน",
-        "finish_title": "🎨 งานเคลือบผิวแข็ง & งานทำสี (Finishing & Painting)",
+        "table_title": "📋 รายการวัสดุที่เลือกในชิ้นงาน",
+        "del_btn": "ลบ",
+        "finish_section": "🎨 4. งานเคลือบผิวแข็ง & งานทำสี (Finishing & Painting)",
         "hardcoat_label": "ประเภท Hardcoat / เคลือบผิว",
         "paint_label": "ประเภทการทำสี / ปิดผิว",
-        "no_hardcoat": "None / ไม่มี",
-        "no_paint": "None / ไม่มี",
-        "service_rate": "อัตราค่าบริการ",
-        "total_price": "ราคารวม",
-        "sqm": "ตร.ม.",
+        "no_select": "None / ไม่มี",
+        "summary_section": "📊 5. สรุปการประเมินราคาและต้นทุนรวม (Cost & Price Summary)",
+        "total_mat_price": "ราคากลางวัสดุรวม",
+        "total_labor_price": "ค่าแรง & ค่าเครื่องรวม",
+        "total_finish_price": "ค่างานทำสี/เคลือบผิวรวม",
+        "grand_total_price": "💰 ราคาขายรวมทั้งสิ้น (Grand Total Price)",
+        "grand_total_cost": "📉 ต้นทุนรวมประมาณการ (Estimated Total Cost)",
+        "profit": "📈 กำไรขั้นต้นประมาณการ (Estimated Profit)",
+        "price": "ราคาขาย",
+        "cost": "ต้นทุน",
         "baht": "฿"
     },
     "EN": {
-        "title": "📦 Material Master Selection",
+        "main_title": "📐 3D Cost Estimator & Material Master System",
+        "dim_section": "📏 1. Dimensions, Volume & Surface Area",
+        "length": "Length (mm)",
+        "width": "Width (mm)",
+        "height": "Height (mm)",
+        "surface_area": "Total Surface Area (sq.m.)",
+        "volume": "Total Volume (cm³)",
+        "labor_section": "⏱️ 2. Labor & Machine Hours",
+        "labor_hrs": "Labor Hours (hrs)",
+        "labor_rate": "Labor Rate (฿/hr)",
+        "machine_hrs": "Machine Hours (hrs)",
+        "machine_rate": "Machine Rate (฿/hr)",
+        "mat_section": "📦 3. Material Master Selection",
         "add_expander": "➕ Click to select and add materials",
         "cat_label": "Select Category",
         "mat_label": "Select Material Item",
         "qty_label": "Quantity / Unit",
         "add_btn": "➕ Add Material",
-        "price": "Price",
-        "cost": "Cost",
-        "finish_title": "🎨 Finishing & Painting",
+        "table_title": "📋 Selected Materials List",
+        "del_btn": "Delete",
+        "finish_section": "🎨 4. Finishing & Painting",
         "hardcoat_label": "Hardcoat / Coating Type",
         "paint_label": "Painting / Surface Finish Type",
-        "no_hardcoat": "None",
-        "no_paint": "None",
-        "service_rate": "Service Rate",
-        "total_price": "Total Price",
-        "sqm": "sq.m.",
+        "no_select": "None",
+        "summary_section": "📊 5. Cost & Price Summary",
+        "total_mat_price": "Total Material Price",
+        "total_labor_price": "Total Labor & Machine Price",
+        "total_finish_price": "Total Finishing Price",
+        "grand_total_price": "💰 Grand Total Price",
+        "grand_total_cost": "📉 Estimated Total Cost",
+        "profit": "📈 Estimated Profit",
+        "price": "Price",
+        "cost": "Cost",
         "baht": "฿"
     }
 }
 
 t = TRANS[st.session_state.lang]
 
+with col_title:
+    st.title(t["main_title"])
+
+st.markdown("---")
+
 # ==========================================
-# 2. ฐานข้อมูลวัสดุสมบูรณ์ (Complete Database)
+# 3. ฐานข้อมูลวัสดุสมบูรณ์ (Complete Database)
 # ==========================================
 MATERIAL_MASTER_DB = {
     "หมวด Foam": {
@@ -235,45 +280,161 @@ MATERIAL_MASTER_DB = {
 }
 
 # ==========================================
-# 3. ส่วน UI: Material Master Selection
+# 4. ส่วนที่ 1: วิเคราะห์พื้นที่ผิวและมิติชิ้นงาน (Dimensions & Surface Area)
 # ==========================================
-st.subheader(t["title"])
+st.subheader(t["dim_section"])
 
-with st.expander(t["add_expander"], expanded=True):
-    col1, col2, col3, col4 = st.columns([2.5, 2.5, 1.5, 1])
-    
-    # 1. เลือกหมวดหมู่
-    categories = list(MATERIAL_MASTER_DB.keys())
-    selected_cat = col1.selectbox(t["cat_label"], options=categories)
-    
-    # 2. เลือกรายการวัสดุในหมวดหมู่นั้นๆ
-    items = list(MATERIAL_MASTER_DB[selected_cat].keys())
-    selected_item = col2.selectbox(t["mat_label"], options=items)
-    
-    # 3. เลือกจำนวน
-    qty = col3.number_input(t["qty_label"], min_value=0.01, value=1.00, step=0.50)
-    
-    # 4. ปุ่มกดเพิ่มวัสดุ
-    col4.markdown("<br>", unsafe_allow_html=True)
-    add_btn = col4.button(t["add_btn"], type="primary")
+dim_col1, dim_col2, dim_col3, dim_col4, dim_col5 = st.columns(5)
 
-    # แสดงราคา & ต้นทุน ตัวที่เลือก
-    item_info = MATERIAL_MASTER_DB[selected_cat][selected_item]
-    st.caption(f"{t['price']}: {t['baht']}{item_info['price']:,.2f} | {t['cost']}: {t['baht']}{item_info['cost']:,.2f}")
+with dim_col1:
+    length = st.number_input(t["length"], min_value=0.0, value=2610.56, step=10.0)
+with dim_col2:
+    width = st.number_input(t["width"], min_value=0.0, value=1700.0, step=10.0)
+with dim_col3:
+    height = st.number_input(t["height"], min_value=0.0, value=500.0, step=10.0)
+
+# คำนวณพื้นที่ผิวอัตโนมัติ (ตร.ม.)
+auto_surface_area = round(2 * ((length * width) + (length * height) + (width * height)) / 1_000_000, 2)
+auto_volume = round((length * width * height) / 1000, 2)
+
+with dim_col4:
+    surface_area = st.number_input(t["surface_area"], min_value=0.0, value=auto_surface_area, step=0.1)
+with dim_col5:
+    volume = st.number_input(t["volume"], min_value=0.0, value=auto_volume, step=10.0)
 
 st.markdown("---")
 
 # ==========================================
-# 4. ส่วน UI: Finishing & Painting
+# 5. ส่วนที่ 2: ชั่วโมงการทำงานและค่าบริการ (Labor & Machine Hours)
 # ==========================================
-st.subheader(t["finish_title"])
+st.subheader(t["labor_section"])
+
+lab_col1, lab_col2, lab_col3, lab_col4 = st.columns(4)
+
+with lab_col1:
+    labor_hrs = st.number_input(t["labor_hrs"], min_value=0.0, value=12.0, step=0.5)
+with lab_col2:
+    labor_rate = st.number_input(t["labor_rate"], min_value=0.0, value=250.0, step=10.0)
+with lab_col3:
+    machine_hrs = st.number_input(t["machine_hrs"], min_value=0.0, value=8.0, step=0.5)
+with lab_col4:
+    machine_rate = st.number_input(t["machine_rate"], min_value=0.0, value=150.0, step=10.0)
+
+total_labor_cost = (labor_hrs * labor_rate) + (machine_hrs * machine_rate)
+total_labor_price = total_labor_cost * 1.2  # กำหนด Margin ค่าแรงเพิ่มเติม 20%
+
+st.caption(f"💡 {t['total_labor_price']}: {t['baht']}{total_labor_price:,.2f} | {t['cost']}: {t['baht']}{total_labor_cost:,.2f}")
+
+st.markdown("---")
+
+# ==========================================
+# 6. ส่วนที่ 3: เลือกรายการวัสดุ (Material Selection & Dynamic Table)
+# ==========================================
+st.subheader(t["mat_section"])
+
+with st.expander(t["add_expander"], expanded=True):
+    col1, col2, col3, col4 = st.columns([2.5, 2.5, 1.5, 1])
+    
+    categories = list(MATERIAL_MASTER_DB.keys())
+    selected_cat = col1.selectbox(t["cat_label"], options=categories)
+    
+    items = list(MATERIAL_MASTER_DB[selected_cat].keys())
+    selected_item = col2.selectbox(t["mat_label"], options=items)
+    
+    qty = col3.number_input(t["qty_label"], min_value=0.01, value=1.00, step=0.50)
+    
+    col4.markdown("<br>", unsafe_allow_html=True)
+    if col4.button(t["add_btn"], type="primary"):
+        item_data = MATERIAL_MASTER_DB[selected_cat][selected_item]
+        st.session_state.added_materials.append({
+            "category": selected_cat,
+            "name": selected_item,
+            "qty": qty,
+            "unit_price": item_data["price"],
+            "unit_cost": item_data["cost"],
+            "total_price": item_data["price"] * qty,
+            "total_cost": item_data["cost"] * qty
+        })
+        st.rerun()
+
+    item_info = MATERIAL_MASTER_DB[selected_cat][selected_item]
+    st.caption(f"{t['price']}: {t['baht']}{item_info['price']:,.2f} | {t['cost']}: {t['baht']}{item_info['cost']:,.2f}")
+
+# แสดงตารางรายการวัสดุที่เลือก
+if st.session_state.added_materials:
+    st.write(f"### {t['table_title']}")
+    
+    total_mat_price = 0.0
+    total_mat_cost = 0.0
+
+    for idx, mat in enumerate(st.session_state.added_materials):
+        c1, c2, c3, c4, c5, c6 = st.columns([3, 1.5, 2, 2, 2, 1])
+        c1.write(f"**{mat['name']}** ({mat['category']})")
+        c2.write(f"x {mat['qty']}")
+        c3.write(f"{t['price']}: {t['baht']}{mat['total_price']:,.2f}")
+        c4.write(f"{t['cost']}: {t['baht']}{mat['total_cost']:,.2f}")
+        
+        total_mat_price += mat['total_price']
+        total_mat_cost += mat['total_cost']
+        
+        if c6.button(t["del_btn"], key=f"del_{idx}"):
+            st.session_state.added_materials.pop(idx)
+            st.rerun()
+else:
+    total_mat_price = 0.0
+    total_mat_cost = 0.0
+
+st.markdown("---")
+
+# ==========================================
+# 7. ส่วนที่ 4: งานเคลือบผิวแข็ง & งานทำสี (Finishing & Painting)
+# ==========================================
+st.subheader(t["finish_section"])
 
 f_col1, f_col2 = st.columns(2)
 
+# อัตราค่าบริการตามประเภทงานต่อ ตร.ม.
+FINISH_RATES = {
+    t["no_select"]: {"price": 0, "cost": 0},
+    "Hardcoat Polyurea": {"price": 1200, "cost": 900},
+    "Epoxy Resin": {"price": 800, "cost": 600},
+    "2K Spray Painting": {"price": 1500, "cost": 1100},
+    "PU Film Coating": {"price": 900, "cost": 700}
+}
+
 with f_col1:
-    hardcoat = st.selectbox(t["hardcoat_label"], options=[t["no_hardcoat"], "Hardcoat Polyurea", "Epoxy Resin"])
-    st.caption(f"{t['service_rate']}: {t['baht']}0.00 / {t['sqm']} | {t['total_price']}: {t['baht']}0.00")
+    hardcoat = st.selectbox(t["hardcoat_label"], options=[t["no_select"], "Hardcoat Polyurea", "Epoxy Resin"])
+    hc_rate = FINISH_RATES.get(hardcoat, {"price": 0, "cost": 0})
+    hc_price = hc_rate["price"] * surface_area
+    hc_cost = hc_rate["cost"] * surface_area
+    st.caption(f"อัตราค่าบริการ: {t['baht']}{hc_rate['price']:,.2f} / ตร.ม. | ราคารวม: {t['baht']}{hc_price:,.2f}")
 
 with f_col2:
-    painting = st.selectbox(t["paint_label"], options=[t["no_paint"], "2K Spray Painting", "PU Film Coating"])
-    st.caption(f"{t['service_rate']}: {t['baht']}0.00 / {t['sqm']} | {t['total_price']}: {t['baht']}0.00")
+    painting = st.selectbox(t["paint_label"], options=[t["no_select"], "2K Spray Painting", "PU Film Coating"])
+    pt_rate = FINISH_RATES.get(painting, {"price": 0, "cost": 0})
+    pt_price = pt_rate["price"] * surface_area
+    pt_cost = pt_rate["cost"] * surface_area
+    st.caption(f"อัตราค่าบริการ: {t['baht']}{pt_rate['price']:,.2f} / ตร.ม. | ราคารวม: {t['baht']}{pt_price:,.2f}")
+
+total_finish_price = hc_price + pt_price
+total_finish_cost = hc_cost + pt_cost
+
+st.markdown("---")
+
+# ==========================================
+# 8. ส่วนที่ 5: สรุปผลการคำนวณทั้งหมด (Cost & Price Summary Dashboard)
+# ==========================================
+st.subheader(t["summary_section"])
+
+grand_total_price = total_mat_price + total_labor_price + total_finish_price
+grand_total_cost = total_mat_cost + total_labor_cost + total_finish_cost
+profit = grand_total_price - grand_total_cost
+margin_percent = (profit / grand_total_price * 100) if grand_total_price > 0 else 0.0
+
+sum_col1, sum_col2, sum_col3 = st.columns(3)
+
+sum_col1.metric(t["grand_total_price"], f"{t['baht']}{grand_total_price:,.2f}")
+sum_col2.metric(t["grand_total_cost"], f"{t['baht']}{grand_total_cost:,.2f}")
+sum_col3.metric(t["profit"], f"{t['baht']}{profit:,.2f}", delta=f"{margin_percent:.1f}% Margin")
+
+st.info(f"💡 **สรุปสัดส่วนราคา:** รายการวัสดุ: {t['baht']}{total_mat_price:,.2f} | ค่าแรง & เครื่องจักร: {t['baht']}{total_labor_price:,.2f} | งานเคลือบ & ทำสี: {t['baht']}{total_finish_price:,.2f}")
