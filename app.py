@@ -45,9 +45,9 @@ page = st.sidebar.radio(
 st.sidebar.divider()
 
 # ==========================================
-# 📦 หน้า 1: วิเคราะห์โมเดล 3D (คงโค้ดเดิมไว้ 100%)
+# 📦 หน้า 1: วิเคราะห์โมเดล 3D
 # ==========================================
-if page == "📦 3D Model Dimension & Surface Area Analyzer":
+if page == "📦 หน้า 1: วิเคราะห์โมเดล 3D & พื้นที่ผิว":
     st.title("📦 3D Model Dimension & Surface Area Analyzer")
     st.write("Upload a 3D model file to automatically extract bounding box dimensions, surface area, volume, and surface detail complexity.")
 
@@ -422,9 +422,9 @@ if page == "📦 3D Model Dimension & Surface Area Analyzer":
                 os.remove(tmp_path)
 
 # ==========================================
-# 💰 หน้าที่ 2: คำนวณราคา (ปรับปรุงฟังก์ชันเลือกวัสดุสมบูรณ์แบบ)
+# 💰 หน้าที่ 2: คำนวณราคา & ใบประเมิน
 # ==========================================
-elif page == "Estimate price & Quotation":
+elif page == "💰 หน้าที่ 2: คำนวณราคา & ใบประเมิน":
     st.title("Costing & Cost Estimate")
     st.caption("ระบบดึงข้อมูลพื้นที่ผิวจากหน้าแรกมาประมวลผลร่วมกับสูตรคำนวณ Robot และ Material Master Data")
 
@@ -432,7 +432,6 @@ elif page == "Estimate price & Quotation":
 
     # ------------------------------------------
     # 🗂️ ฐานข้อมูลวัสดุ (Material Master Data)
-    # Structure: {"หมวดหมู่": {"ชื่อวัสดุ": {"price": ราคาขาย, "cost": ต้นทุน}}}
     # ------------------------------------------
     MATERIAL_MASTER_DB = {
         "หมวด Foam": {
@@ -667,7 +666,6 @@ elif page == "Estimate price & Quotation":
             materials_in_cat = list(MATERIAL_MASTER_DB[selected_cat].keys())
             selected_mat_item = st.selectbox("เลือกรายการวัสดุ", materials_in_cat)
             
-        # ดึงราคาจาก Database
         unit_price = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
         unit_cost = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
 
@@ -679,7 +677,6 @@ elif page == "Estimate price & Quotation":
             st.write(" ")
             st.write(" ")
             if st.button("➕ เพิ่มวัสดุ", use_container_width=True):
-                # ตรวจสอบส่วนลดพิเศษสำหรับไม้อัดยางมารีน 20mm
                 final_price = unit_price
                 final_cost = unit_cost
                 if selected_mat_item == "ไม้อัดยางมารีน 20mm" and mat_qty >= 100:
@@ -696,101 +693,69 @@ elif page == "Estimate price & Quotation":
                     "total_cost": final_cost * mat_qty
                 }
                 st.session_state["selected_materials"].append(new_item)
-                st.success(f"เพิ่ม {selected_mat_item} เรียบร้อย!")
+                st.toast(f"เพิ่ม {selected_mat_item} จำนวน {mat_qty} เรียบร้อยแล้ว")
 
-    # แสดงตารางรายการวัสดุที่เลือก
-    total_material_cost_val = 0.0
-    total_material_price_val = 0.0
-
+    # แสดงตารางวัสดุที่เลือก
     if st.session_state["selected_materials"]:
-        st.markdown("**ตารางรายการวัสดุที่เลือกใช้ในโครงการ:**")
+        st.markdown("###### 📋 รายการวัสดุที่เลือกในชิ้นงานนี้")
+        mat_df = pd.DataFrame(st.session_state["selected_materials"])
         
-        mat_table_data = []
-        for idx, item in enumerate(st.session_state["selected_materials"]):
-            mat_table_data.append({
-                "ลำดับ": idx + 1,
-                "หมวดหมู่": item["cat"],
-                "รายการวัสดุ": item["name"],
-                "จำนวน": item["qty"],
-                "ราคาต่อหน่วย (บาท)": f"฿{item['unit_price']:,.2f}",
-                "ราคารวมขาย (บาท)": f"฿{item['total_price']:,.2f}",
-                "ต้นทุนรวม (บาท)": f"฿{item['total_cost']:,.2f}"
-            })
-            total_material_price_val += item["total_price"]
-            total_material_cost_val += item["total_cost"]
+        # Display table formatted
+        display_df = mat_df[["cat", "name", "qty", "unit_price", "total_price"]].copy()
+        display_df.columns = ["หมวดหมู่", "ชื่อวัสดุ", "จำนวน", "ราคา/หน่วย (฿)", "ราคารวม (฿)"]
+        st.dataframe(display_df, use_container_width=True)
 
-        st.dataframe(pd.DataFrame(mat_table_data), use_container_width=True)
-
-        c_del1, c_del2 = st.columns([1, 4])
-        with c_del1:
+        col_clear, col_stat = st.columns([1, 3])
+        with col_clear:
             if st.button("🗑️ ล้างรายการวัสดุทั้งหมด"):
                 st.session_state["selected_materials"] = []
                 st.rerun()
-    else:
-        st.info("💡 ยังไม่ได้เลือกวัสดุเพิ่มเติม โปรดเลือกหมวดหมู่และเพิ่มรายการวัสดุด้านบน")
 
-    # งานเคลือบผิวและทำสี
+    # ==========================================
+    # 🎨 งานเคลือบผิว & งานทำสี (Hardcoat & Painting)
+    # ==========================================
     st.markdown("---")
-    st.markdown("##### 🎨 งานเคลือบผิวและทำสี (Hard Coat & Finishing)")
-    c_coat1, c_coat2 = st.columns(2)
-    with c_coat1:
-        sel_hardcoat = st.selectbox("ประเภท Hard Coat", list(HARDCOAT_RATES.keys()))
-    with c_coat2:
-        sel_color = st.selectbox("ประเภทการทำสี (Color Type)", list(COLOR_RATES.keys()))
-
-    st.divider()
-
-    # ==========================================
-    # 🧮 การคำนวณราคาสรุป
-    # ==========================================
-    r_time = (robot_prog + robot_setup + robot_mch) if use_robot else 0
-    r_mch_cost = r_time * robot_rate if use_robot else 0
-
-    f_time = (fdm_prog + fdm_setup + fdm_mch) if use_fdm else 0
-    f_mch_cost = f_time * fdm_rate if use_fdm else 0
-
-    l_time = (laser_prog + laser_setup + laser_mch) if use_laser else 0
-    l_mch_cost = l_time * laser_rate if use_laser else 0
-
-    # ยอดรวมค่าเครื่องจักร และ วัสดุทั้งหมด
-    total_mch_cost = r_mch_cost + f_mch_cost + l_mch_cost
+    st.markdown("##### 🎨 งานเคลือบผิวแข็ง & งานทำสี (Finishing & Painting)")
+    c_hc1, c_hc2 = st.columns(2)
     
-    # รวมค่าวัสดุทั้งหมดจากตาราง Material Master
-    total_mat_cost = total_material_price_val
-    prototype_cost = total_mch_cost + total_mat_cost
+    with c_hc1:
+        selected_hardcoat = st.selectbox("ประเภท Hardcoat / เคลือบผิว", list(HARDCOAT_RATES.keys()))
+        hardcoat_rate = HARDCOAT_RATES[selected_hardcoat]
+        hardcoat_cost = hardcoat_rate * calc_area
+        st.caption(f"อัตราค่าบริการ: ฿{hardcoat_rate:,.2f} / ตร.ม. | ราคารวม: ฿{hardcoat_cost:,.2f}")
 
-    hardcoat_cost = calc_area * HARDCOAT_RATES[sel_hardcoat]
-    color_cost = calc_area * COLOR_RATES[sel_color]
-
-    grand_total = prototype_cost + hardcoat_cost + color_cost
+    with c_hc2:
+        selected_color = st.selectbox("ประเภทการทำสี / ปิดผิว", list(COLOR_RATES.keys()))
+        color_rate = COLOR_RATES[selected_color]
+        color_cost = color_rate * calc_area
+        st.caption(f"อัตราค่าบริการ: ฿{color_rate:,.2f} / ตร.ม. | ราคารวม: ฿{color_cost:,.2f}")
 
     # ==========================================
-    # 📋 ตารางสรุปผล
+    # 🧮 การคำนวณสรุปราคาและต้นทุนรวม
     # ==========================================
-    st.subheader(f"📋 สรุปใบประเมินราคา: {project_name}")
+    st.markdown("---")
+    st.subheader("📊 สรุปประมาณการราคาผลิต (Costing & Price Summary)")
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("ชั่วโมง Robot รวม", f"{r_time:.1f} ชม.")
-    m2.metric("ค่าเครื่องจักรรวม", f"฿{total_mch_cost:,.2f}")
-    m3.metric("ค่าวัสดุทั้งหมด", f"฿{total_mat_cost:,.2f}", f"ต้นทุน ฿{total_material_cost_val:,.2f}")
-    m4.metric("💰 ราคาสรุปสุทธิ (Grand Total)", f"฿{grand_total:,.2f}")
+    # 1. ค่าเครื่องจักร
+    robot_total = (robot_prog + robot_setup + robot_mch) * robot_rate if use_robot else 0.0
+    fdm_total = (fdm_prog + fdm_setup + fdm_mch) * fdm_rate if use_fdm else 0.0
+    laser_total = (laser_prog + laser_setup + laser_mch) * laser_rate if use_laser else 0.0
+    machine_total = robot_total + fdm_total + laser_total
 
-    df_summary = pd.DataFrame({
-        "Operation and Material": [
-            "1. Robot Milling", 
-            "2. 3D Print FDM", 
-            "3. Structure", 
-            "4. Fiber Laser N2", 
-            "5. Total Material Master Data"
-        ],
-        "เวลารวม (Hr)": [f"{r_time:.1f}", f"{f_time:.1f}", "-", f"{l_time:.1f}", "-"],
-        "ค่าเครื่องจักร (Baht)": [f"฿{r_mch_cost:,.2f}", f"฿{f_mch_cost:,.2f}", "฿0.00", f"฿{l_mch_cost:,.2f}", "฿0.00"],
-        "ค่าวัสดุ (Baht)": ["฿0.00", "฿0.00", "฿0.00", "฿0.00", f"฿{total_mat_cost:,.2f}"]
-    })
-    st.table(df_summary)
+    # 2. ค่าวัดถุดิบ (จากรายการที่เลือก)
+    material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
+    material_total_cost = sum(item["total_cost"] for item in st.session_state["selected_materials"])
 
-    st.markdown(f"""
-    > **Hard Coat:**
-    > * **Hard Coat ({sel_hardcoat}):** {calc_area:.2f} sq.m. × ฿{HARDCOAT_RATES[sel_hardcoat]:,} = **฿{hardcoat_cost:,.2f}**
-    > * **Color ({sel_color}):** {calc_area:.2f} sq.m. × ฿{COLOR_RATES[sel_color]:,} = **฿{color_cost:,.2f}**
-    """)
+    # 3. ค่าทำสี/เคลือบผิว
+    finishing_total = hardcoat_cost + color_cost
+
+    # ราคารวมประเมินเบื้องต้น
+    subtotal = machine_total + material_total_price + finishing_total
+
+    col_res1, col_res2, col_res3 = st.columns(3)
+    col_res1.metric("ค่าประมวลผลเครื่องจักร", f"฿{machine_total:,.2f}")
+    col_res2.metric("ค่าวัสดุและอุปกรณ์", f"฿{material_total_price:,.2f}")
+    col_res3.metric("ค่าเคลือบผิว & ทำสี", f"฿{finishing_total:,.2f}")
+
+    st.markdown("### 🏷️ ราคารวมประมาณการ (Grand Total)")
+    st.title(f"฿ {subtotal:,.2f} บาท")
