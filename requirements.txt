@@ -1,2 +1,5 @@
-trimesh
 streamlit
+trimesh
+numpy
+pandas
+scipy
