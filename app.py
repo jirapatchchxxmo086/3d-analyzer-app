@@ -14,6 +14,82 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="3D Model Analyzer & Cost Estimator", page_icon="📦", layout="wide")
 
 # ==========================================
+# 🎨 1b. Custom Theme — Studio / Art Workshop, warm
+# ==========================================
+# Base colors (primary/background/text) come from .streamlit/config.toml.
+# This block layers deeper styling on top: cards, metrics, buttons, headers,
+# tables, and expanders — matching the warm coral/amber studio look.
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'IBM Plex Sans Thai', 'IBM Plex Sans', sans-serif;
+    }
+
+    h1, h2, h3 {
+        font-family: 'Fraunces', serif !important;
+        color: #3A2E26 !important;
+        font-weight: 600 !important;
+    }
+
+    /* Metric cards */
+    div[data-testid="stMetric"] {
+        background: #F3E7D8;
+        border-radius: 12px;
+        padding: 1rem 1.1rem;
+        border: 1px solid #E8D5BE;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #8A6F5C !important;
+    }
+    div[data-testid="stMetricValue"] {
+        color: #3A2E26 !important;
+        font-family: 'IBM Plex Sans Thai', sans-serif;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        background-color: #C65D3B;
+        color: #FFFFFF;
+        border: none;
+        border-radius: 8px;
+        font-weight: 500;
+        transition: filter 0.15s ease;
+    }
+    .stButton > button:hover {
+        filter: brightness(1.08);
+        color: #FFFFFF;
+    }
+
+    /* Expanders */
+    div[data-testid="stExpander"] {
+        border: 1px solid #E8D5BE;
+        border-radius: 12px;
+        background: #FBF6F0;
+    }
+
+    /* Dataframes / tables */
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #E8D5BE;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background-color: #F3E7D8;
+        border-right: 1px solid #E8D5BE;
+    }
+
+    /* Success / info / warning boxes keep readable warm-tinted borders */
+    div[data-testid="stAlert"] {
+        border-radius: 8px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==========================================
 # 🌐 2. Language Translations Dictionary
 # ==========================================
 TEXTS = {
