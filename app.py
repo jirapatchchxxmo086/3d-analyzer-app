@@ -62,6 +62,19 @@ TEXTS = {
         "calc_area": "พื้นที่ทำสี/เคลือบผิว (sq.m.)",
         "op_title": "⚙️ เลือกกระบวนการเครื่องจักร (Operations)",
         "mch_rate": "ค่าเครื่อง (฿/Hr)",
+        "op_select_machine": "เลือกประเภทเครื่องจักร",
+        "op_rate": "ค่าเครื่อง",
+        "op_qty_hr": "จำนวนชั่วโมง (Hr)",
+        "op_qty_unit": "จำนวนชิ้น (Unit)",
+        "op_add_btn": "➕ เพิ่มกระบวนการ",
+        "op_expander": "➕ คลิกเพื่อเลือกและเพิ่มกระบวนการเครื่องจักรลงในชิ้นงาน",
+        "op_selected_list": "📋 รายการกระบวนการเครื่องจักรที่เลือกในชิ้นงานนี้",
+        "op_clear_btn": "🗑️ ล้างรายการกระบวนการทั้งหมด",
+        "op_col_machine": "เครื่องจักร",
+        "op_col_unit": "หน่วยคิดราคา",
+        "op_col_rate": "อัตรา (฿)",
+        "op_col_qty": "จำนวน",
+        "op_col_total": "รวม (฿)",
         "use_mat": "📦 ระบบเลือกรายการวัสดุสำหรับผลิตชิ้นงาน (Material Master Selection)",
         "mat_expander": "➕ คลิกเพื่อเลือกและเพิ่มรายการวัสดุลงในชิ้นงาน",
         "select_cat": "เลือกหมวดหมู่วัสดุ",
@@ -125,6 +138,19 @@ TEXTS = {
         "calc_area": "Painting / Coating Area (sq.m.)",
         "op_title": "⚙️ Select Machine Operations",
         "mch_rate": "Machine Rate (฿/Hr)",
+        "op_select_machine": "Select Machine Type",
+        "op_rate": "Rate",
+        "op_qty_hr": "Hours (Hr)",
+        "op_qty_unit": "Quantity (Unit)",
+        "op_add_btn": "➕ Add Operation",
+        "op_expander": "➕ Click to select and add machine operations to the project",
+        "op_selected_list": "📋 Selected Machine Operations",
+        "op_clear_btn": "🗑️ Clear All Operations",
+        "op_col_machine": "Machine",
+        "op_col_unit": "Billing Unit",
+        "op_col_rate": "Rate (฿)",
+        "op_col_qty": "Qty",
+        "op_col_total": "Total (฿)",
         "use_mat": "📦 Material Master Selection",
         "mat_expander": "➕ Click to select and add materials to the project",
         "select_cat": "Select Category",
@@ -164,6 +190,8 @@ if "file_name" not in st.session_state:
     st.session_state["file_name"] = "ยังไม่ได้เลือกไฟล์"
 if "selected_materials" not in st.session_state:
     st.session_state["selected_materials"] = []
+if "selected_operations" not in st.session_state:
+    st.session_state["selected_operations"] = []
 
 # ==========================================
 # 🧭 4. Sidebar Navigation & Language Selector
@@ -734,6 +762,32 @@ elif page == t["page_2_name"]:
     HARDCOAT_RATES = {"None / ไม่มี": 0, "Polyurea": 1350, "Mold Fiber": 1520, "Fiberglass": 1090, "Epoxy": 600}
     COLOR_RATES = {"None / ไม่มี": 0, "Normal": 1440, "Chromium": 4800, "The Code": 1800, "Gold leaves": 168, "Sticker": 1200}
 
+    # 🏭 Machine Master Data — billing unit per machine type (from factory Excel IFS formula).
+    # Everything is Baht/Hr. except 3D Print SLA, which bills per finished unit (Baht/Unit).
+    # Add/remove machine types here — the Operations UI below reads this list automatically.
+    MACHINE_TYPES = {
+        "Robot": "Baht/Hr.",
+        "CNC Router": "Baht/Hr.",
+        "Hotwire": "Baht/Hr.",
+        "Robot / Router": "Baht/Hr.",
+        "Robot / Hotwire": "Baht/Hr.",
+        "CNC Router / Hotwire": "Baht/Hr.",
+        "Water Jet": "Baht/Hr.",
+        "Co2 laser": "Baht/Hr.",
+        "Fiber laser N2": "Baht/Hr.",
+        "Fiber laser O2": "Baht/Hr.",
+        "3D Print FDM": "Baht/Hr.",
+        "3D Print SLA": "Baht/Unit",
+        "Structure": "Baht/Hr.",
+    }
+    # Default machine rates (฿) — placeholders until real factory rates are entered; editable per-operation in the UI.
+    MACHINE_DEFAULT_RATES = {
+        "Robot": 300, "CNC Router": 300, "Hotwire": 200, "Robot / Router": 300,
+        "Robot / Hotwire": 300, "CNC Router / Hotwire": 300, "Water Jet": 800,
+        "Co2 laser": 600, "Fiber laser N2": 2400, "Fiber laser O2": 2400,
+        "3D Print FDM": 50, "3D Print SLA": 150, "Structure": 250,
+    }
+
     # 1. ข้อมูลทั่วไป
     col_in1, col_in2 = st.columns(2)
     with col_in1:
@@ -749,36 +803,62 @@ elif page == t["page_2_name"]:
         )
 
     st.markdown(f"##### {t['op_title']}")
-    c_op1, c_op2, c_op3, c_op4 = st.columns(4)
 
-    with c_op1:
-        st.markdown("**1. Robot Milling**")
-        use_robot = st.checkbox("Use Robot", value=True)
-        robot_rate = st.number_input(f"Robot {t['mch_rate']}", value=300)
-        robot_prog = st.number_input("Program (Hr)", value=0.5, key="r_p")
-        robot_setup = st.number_input("Setup (Hr)", value=0.5, key="r_s")
-        auto_robot_mch = calc_area * LEVEL_FACTORS.get(complexity_level, 5.0)
-        robot_mch = st.number_input("Machine (Hr)", value=float(auto_robot_mch), key="r_m")
+    with st.expander(t["op_expander"], expanded=True):
+        o_col1, o_col2, o_col3, o_col4 = st.columns([2, 1.3, 1.3, 1])
 
-    with c_op2:
-        st.markdown("**2. 3D Print FDM**")
-        use_fdm = st.checkbox("Use FDM", value=False)
-        fdm_rate = st.number_input(f"FDM {t['mch_rate']}", value=50)
-        fdm_prog = st.number_input("Program (Hr)", value=0.5, key="f_p")
-        fdm_setup = st.number_input("Setup (Hr)", value=0.5, key="f_s")
-        fdm_mch = st.number_input("Machine (Hr)", value=17.0, key="f_m")
+        with o_col1:
+            selected_machine = st.selectbox(t["op_select_machine"], list(MACHINE_TYPES.keys()))
 
-    with c_op3:
-        st.markdown("**3. Structure & Assembly**")
-        use_struct = st.checkbox("Structure Work", value=False)
+        op_unit = MACHINE_TYPES[selected_machine]  # "Baht/Hr." or "Baht/Unit"
+        default_rate = MACHINE_DEFAULT_RATES.get(selected_machine, 0)
 
-    with c_op4:
-        st.markdown("**4. Fiber Laser N2**")
-        use_laser = st.checkbox("Use Laser", value=False)
-        laser_rate = st.number_input(f"Laser {t['mch_rate']}", value=2400)
-        laser_prog = st.number_input("Program (Hr)", value=0.5, key="l_p")
-        laser_setup = st.number_input("Setup (Hr)", value=0.5, key="l_s")
-        laser_mch = st.number_input("Machine (Hr)", value=0.5, key="l_m")
+        with o_col2:
+            op_rate = st.number_input(
+                f"{t['op_rate']} ({op_unit})",
+                min_value=0.0, value=float(default_rate), step=10.0
+            )
+
+        with o_col3:
+            if op_unit == "Baht/Hr.":
+                # Handy default for Robot: suggest hours from area × complexity level factor,
+                # same estimate the original single-machine version used.
+                if selected_machine == "Robot":
+                    suggested_qty = round(calc_area * LEVEL_FACTORS.get(complexity_level, 5.0), 2)
+                else:
+                    suggested_qty = 1.0
+                op_qty = st.number_input(t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5)
+            else:  # Baht/Unit (e.g. 3D Print SLA)
+                op_qty = st.number_input(t["op_qty_unit"], min_value=0.0, value=1.0, step=1.0)
+
+        with o_col4:
+            st.write(" ")
+            st.write(" ")
+            if st.button(t["op_add_btn"], use_container_width=True, key="add_op_btn"):
+                new_op = {
+                    "machine": selected_machine,
+                    "unit": op_unit,
+                    "rate": op_rate,
+                    "qty": op_qty,
+                    "total": op_rate * op_qty,
+                }
+                st.session_state["selected_operations"].append(new_op)
+                st.toast(f"Added {selected_machine} x {op_qty} {op_unit}")
+
+    if st.session_state["selected_operations"]:
+        st.markdown(f"###### {t['op_selected_list']}")
+        ops_df = pd.DataFrame(st.session_state["selected_operations"])
+        display_ops_df = ops_df[["machine", "unit", "rate", "qty", "total"]].copy()
+        display_ops_df.columns = [
+            t["op_col_machine"], t["op_col_unit"], t["op_col_rate"], t["op_col_qty"], t["op_col_total"]
+        ]
+        st.dataframe(display_ops_df, use_container_width=True)
+
+        col_clear_op, col_stat_op = st.columns([1, 3])
+        with col_clear_op:
+            if st.button(t["op_clear_btn"]):
+                st.session_state["selected_operations"] = []
+                st.rerun()
 
     # ==========================================
     # 📦 ระบบเลือกวัสดุจาก Master Data
@@ -858,10 +938,7 @@ elif page == t["page_2_name"]:
     st.markdown("---")
     st.subheader(t["summary_title"])
 
-    robot_total = (robot_prog + robot_setup + robot_mch) * robot_rate if use_robot else 0.0
-    fdm_total = (fdm_prog + fdm_setup + fdm_mch) * fdm_rate if use_fdm else 0.0
-    laser_total = (laser_prog + laser_setup + laser_mch) * laser_rate if use_laser else 0.0
-    machine_total = robot_total + fdm_total + laser_total
+    machine_total = sum(op["total"] for op in st.session_state["selected_operations"])
 
     material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
     finishing_total = hardcoat_cost + color_cost
