@@ -39,6 +39,7 @@ st.markdown("""
         border-radius: 12px;
         padding: 1rem 1.1rem;
         border: 1px solid #E8D5BE;
+        overflow: visible;
     }
     div[data-testid="stMetricLabel"] {
         color: #8A6F5C !important;
@@ -46,6 +47,12 @@ st.markdown("""
     div[data-testid="stMetricValue"] {
         color: #3A2E26 !important;
         font-family: 'IBM Plex Sans Thai', sans-serif;
+        overflow: visible !important;
+        text-overflow: unset !important;
+        font-size: 1.15rem !important;
+    }
+    div[data-testid="stMetricDelta"] {
+        overflow: visible !important;
     }
 
     /* Buttons */
@@ -82,6 +89,31 @@ st.markdown("""
         border-right: 1px solid #E8D5BE;
     }
 
+    /* Sidebar nav pills (built from st.sidebar.radio) */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] > div {
+        flex-direction: column;
+        gap: 4px;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label {
+        padding: 10px 12px;
+        border-radius: 8px;
+        width: 100%;
+        margin: 0;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label > div:first-child {
+        display: none;  /* hide the default radio dot */
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {
+        background: #EADFCC;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label:has(input:checked) {
+        background: #C65D3B;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label:has(input:checked) p {
+        color: #FFFFFF !important;
+        font-weight: 500;
+    }
+
     /* Success / info / warning boxes keep readable warm-tinted borders */
     div[data-testid="stAlert"] {
         border-radius: 8px;
@@ -101,6 +133,10 @@ TEXTS = {
         # Page 1
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
         "p1_sub": "อัปโหลดไฟล์โมเดล 3D เพื่อวิเคราะห์ขนาด Bounding Box, พื้นที่ผิว, ปริมาตร และความซับซ้อนของพื้นผิวอัตโนมัติ",
+        "welcome_title": "สวัสดีค่ะ",
+        "welcome_sub": "มาเริ่มสร้างสรรค์งานชิ้นต่อไปกันเถอะ",
+        "file_processed_badge": "ประมวลผลไฟล์สำเร็จ",
+        "file_processed_sub": "ข้อมูลพร้อมสำหรับประเมินราคา",
         "unit_setting": "⚙️ ตั้งค่าหน่วย",
         "unit_select": "เลือกหน่วยของไฟล์โมเดล 3D",
         "unit_help": "ไฟล์ 3D (OBJ, STL, PLY) เก็บเพียงตัวเลขไม่มีหน่วย กำหนดหน่วยให้ตรงกับตอนสร้างโมเดล",
@@ -177,6 +213,10 @@ TEXTS = {
         # Page 1
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
         "p1_sub": "Upload a 3D model file to automatically extract bounding box dimensions, surface area, volume, and surface detail complexity.",
+        "welcome_title": "Welcome back",
+        "welcome_sub": "Let's bring your ideas to life.",
+        "file_processed_badge": "File processed successfully",
+        "file_processed_sub": "Data ready for cost estimation",
         "unit_setting": "⚙️ Unit Settings",
         "unit_select": "Select Model File Unit",
         "unit_help": "3D formats (OBJ, STL, PLY) store raw numbers without units. Select the unit used when creating the model.",
@@ -272,6 +312,18 @@ if "selected_operations" not in st.session_state:
 # ==========================================
 # 🧭 4. Sidebar Navigation & Language Selector
 # ==========================================
+# --- Sidebar brand header (logo + app name), like the top-left brand mark ---
+st.sidebar.markdown("""
+<div style="display:flex; align-items:center; gap:10px; padding:4px 0 18px;">
+    <div style="width:38px; height:38px; border-radius:10px; background:#F3E7D8;
+                display:flex; align-items:center; justify-content:center; font-size:20px;">🧊</div>
+    <div>
+        <p style="margin:0; font-weight:600; font-size:16px; color:#3A2E26; line-height:1.2;">3D Analyzer</p>
+        <p style="margin:0; font-size:12px; color:#8A6F5C; line-height:1.2;">Cost Estimator</p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 lang = st.sidebar.selectbox(
     TEXTS[st.session_state["language"]]["lang_select"],
     options=["TH", "EN"],
@@ -280,11 +332,11 @@ lang = st.sidebar.selectbox(
 st.session_state["language"] = lang
 t = TEXTS[lang]  # Short access for current language dict
 
-st.sidebar.title(t["sidebar_menu"])
-page = st.sidebar.radio(
-    "",
-    [t["page_1_name"], t["page_2_name"]]
-)
+nav_options = [t["page_1_name"], t["page_2_name"]]
+if "nav_page_choice" not in st.session_state or st.session_state["nav_page_choice"] not in nav_options:
+    st.session_state["nav_page_choice"] = nav_options[0]
+
+page = st.sidebar.radio("", nav_options, key="nav_page_choice")
 
 st.sidebar.divider()
 
@@ -292,8 +344,15 @@ st.sidebar.divider()
 # 📦 หน้า 1: วิเคราะห์โมเดล 3D
 # ==========================================
 if page == t["page_1_name"]:
-    st.title(t["p1_title"])
-    st.write(t["p1_sub"])
+    st.markdown(f"""
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:1.2rem;">
+        <span style="font-size:26px;">👋</span>
+        <div>
+            <p style="margin:0; font-weight:600; font-size:19px; color:#3A2E26;">{t['welcome_title']}</p>
+            <p style="margin:0; font-size:13px; color:#8A6F5C;">{t['welcome_sub']}</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.sidebar.header(t["unit_setting"])
     unit_input = st.sidebar.selectbox(
@@ -435,11 +494,27 @@ if page == t["page_1_name"]:
                 position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
                 color: #ffffff; font-family: sans-serif; font-size: 14px; pointer-events: none;
             }
+            #viewer-toolbar {
+                position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+                display: flex; gap: 8px; z-index: 10;
+            }
+            #viewer-toolbar button {
+                width: 36px; height: 36px; border-radius: 8px; border: none;
+                background: rgba(255,255,255,0.92); color: #3A2E26;
+                font-size: 16px; cursor: pointer; display: flex;
+                align-items: center; justify-content: center;
+            }
+            #viewer-toolbar button:hover { background: #ffffff; }
         </style>
     </head>
     <body>
         <div id="viewer-container">
             <div id="loading">Loading 3D Model...</div>
+            <div id="viewer-toolbar">
+                <button id="btn-reset" title="Reset view">&#8635;</button>
+                <button id="btn-zoom-in" title="Zoom in">+</button>
+                <button id="btn-zoom-out" title="Zoom out">&minus;</button>
+            </div>
         </div>
         <script>
             const container = document.getElementById('viewer-container');
@@ -477,6 +552,8 @@ if page == t["page_1_name"]:
                 return bytes.buffer;
             }
 
+            let initialCameraPos = null;
+
             try {
                 const loader = new THREE.STLLoader();
                 const arrayBuffer = base64ToArrayBuffer("$b64_stl");
@@ -498,12 +575,29 @@ if page == t["page_1_name"]:
                 camera.position.set(radius * 2.2, radius * 2.2, radius * 2.2);
                 camera.lookAt(0, 0, 0);
                 controls.update();
+                initialCameraPos = camera.position.clone();
 
                 loading.style.display = 'none';
             } catch (err) {
                 loading.innerText = 'Failed to load 3D preview';
                 console.error(err);
             }
+
+            document.getElementById('btn-zoom-in').addEventListener('click', function () {
+                camera.position.multiplyScalar(0.8);
+                controls.update();
+            });
+            document.getElementById('btn-zoom-out').addEventListener('click', function () {
+                camera.position.multiplyScalar(1.25);
+                controls.update();
+            });
+            document.getElementById('btn-reset').addEventListener('click', function () {
+                if (initialCameraPos) {
+                    camera.position.copy(initialCameraPos);
+                    controls.target.set(0, 0, 0);
+                    controls.update();
+                }
+            });
 
             function animate() {
                 requestAnimationFrame(animate);
@@ -515,6 +609,7 @@ if page == t["page_1_name"]:
     </body>
     </html>
     """)
+
 
     def render_3d_viewer(mesh_obj):
         try:
@@ -590,8 +685,29 @@ if page == t["page_1_name"]:
                 st.session_state["height_z_mm"] = height_z_m * 1000
                 st.session_state["file_name"] = uploaded_file.name
 
-            st.success(t["success_msg"])
-            st.divider()
+            file_size_kb = uploaded_file.size / 1024
+
+            st.markdown(f"""
+            <div style="background:#FFFFFF; border:1px solid #E8D5BE; border-radius:12px;
+                        padding:14px 18px; display:flex; align-items:center; justify-content:space-between;
+                        margin-bottom:1.2rem;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="width:38px; height:38px; border-radius:8px; background:#F3E7D8;
+                                display:flex; align-items:center; justify-content:center; font-size:18px;">📄</div>
+                    <div>
+                        <p style="margin:0; font-weight:500; font-size:14px; color:#3A2E26;">{uploaded_file.name}</p>
+                        <p style="margin:0; font-size:12px; color:#8A6F5C;">{file_size_kb:.1f} KB</p>
+                    </div>
+                </div>
+                <div style="background:#E7F1E4; border-radius:8px; padding:8px 14px; display:flex; align-items:center; gap:8px;">
+                    <span style="color:#2E7D32; font-size:16px;">✓</span>
+                    <div>
+                        <p style="margin:0; font-weight:500; font-size:13px; color:#2E7D32;">{t['file_processed_badge']}</p>
+                        <p style="margin:0; font-size:11px; color:#4E7A50;">{t['file_processed_sub']}</p>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
             col_viewer, col_metrics = st.columns([1.2, 1])
 
@@ -607,9 +723,9 @@ if page == t["page_1_name"]:
             with col_metrics:
                 st.subheader(t["dim_title"])
                 dim_col1, dim_col2, dim_col3 = st.columns(3)
-                dim_col1.metric(t["dim_w"], f"{width_x_m:.3f} m", f"{width_x_cm:.1f} cm")
-                dim_col2.metric(t["dim_l"], f"{length_y_m:.3f} m", f"{length_y_cm:.1f} cm")
-                dim_col3.metric(t["dim_h"], f"{height_z_m:.3f} m", f"{height_z_cm:.1f} cm")
+                dim_col1.metric(t["dim_w"], f"{width_x_m:,.3f} m", f"{width_x_cm:,.1f} cm")
+                dim_col2.metric(t["dim_l"], f"{length_y_m:,.3f} m", f"{length_y_cm:,.1f} cm")
+                dim_col3.metric(t["dim_h"], f"{height_z_m:,.3f} m", f"{height_z_cm:,.1f} cm")
 
                 min_dimension_m = min(width_x_m, length_y_m, height_z_m)
                 if min_dimension_m < 0.10:
@@ -619,12 +735,12 @@ if page == t["page_1_name"]:
 
                 st.subheader(t["area_vol_title"])
                 res_a, res_b = st.columns(2)
-                res_a.metric(t["surf_area"], f"{surface_area_m2:.4f} sq.m", f"{surface_area_cm2:,.1f} sq.cm")
+                res_a.metric(t["surf_area"], f"{surface_area_m2:,.4f} sq.m", f"{surface_area_cm2:,.1f} sq.cm")
 
                 if is_watertight:
-                    res_b.metric(t["vol_exact"], f"{volume_m3:.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
+                    res_b.metric(t["vol_exact"], f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
                 elif used_convex_hull and volume_m3 > 0:
-                    res_b.metric(t["vol_hull"], f"{volume_m3:.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
+                    res_b.metric(t["vol_hull"], f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
                     st.info(t["vol_note"])
                 else:
                     res_b.info(t["vol_err"])
