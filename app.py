@@ -999,252 +999,290 @@ elif page == t["page_2_name"]:
     with st.expander(t["op_expander"], expanded=True):
         o_col1, o_col2, o_col3, o_col4 = st.columns([2, 1.3, 1.3, 1])
 
-        with o_col1:
-            selected_machine = st.selectbox(t["op_select_machine"], list(MACHINE_TYPES.keys()))
+       import streamlit as st
+import pandas as pd
+import json
 
-        op_unit = MACHINE_TYPES[selected_machine]  # "Baht/Hr." or "Baht/Unit"
-        default_rate = MACHINE_DEFAULT_RATES.get(selected_machine, 0)
-
-        with o_col2:
-            op_rate = st.number_input(
-                f"{t['op_rate']} ({op_unit})",
-                min_value=0.0, value=float(default_rate), step=10.0
-            )
-
-        with o_col3:
-            if op_unit == "Baht/Hr.":
-                # Handy default for Robot: suggest hours from area × complexity level factor,
-                # same estimate the original single-machine version used.
-                if selected_machine == "Robot":
-                    suggested_qty = round(calc_area * LEVEL_FACTORS.get(complexity_level, 5.0), 2)
-                else:
-                    suggested_qty = 1.0
-                op_qty = st.number_input(t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5)
-            else:  # Baht/Unit (e.g. 3D Print SLA)
-                op_qty = st.number_input(t["op_qty_unit"], min_value=0.0, value=1.0, step=1.0)
-
-        with o_col4:
-            st.write(" ")
-            st.write(" ")
-            if st.button(t["op_add_btn"], use_container_width=True, key="add_op_btn"):
-                new_op = {
-                    "machine": selected_machine,
-                    "unit": op_unit,
-                    "rate": op_rate,
-                    "qty": op_qty,
-                    "total": op_rate * op_qty,
-                }
-                st.session_state["selected_operations"].append(new_op)
-                st.toast(f"Added {selected_machine} x {op_qty} {op_unit}")
-
-    if st.session_state["selected_operations"]:
-        st.markdown(f"###### {t['op_selected_list']}")
-        ops_df = pd.DataFrame(st.session_state["selected_operations"])
-        display_ops_df = ops_df[["machine", "unit", "rate", "qty", "total"]].copy()
-        display_ops_df.columns = [
-            t["op_col_machine"], t["op_col_unit"], t["op_col_rate"], t["op_col_qty"], t["op_col_total"]
-        ]
-        st.dataframe(display_ops_df, use_container_width=True)
-
-        col_clear_op, col_stat_op = st.columns([1, 3])
-        with col_clear_op:
-            if st.button(t["op_clear_btn"]):
-                st.session_state["selected_operations"] = []
-                st.rerun()
-
-    # ==========================================
-    # 📦 ระบบเลือกวัสดุจาก Master Data
-    # ==========================================
-    st.markdown("---")
-    st.markdown(f"##### {t['use_mat']}")
-
-    with st.expander(t["mat_expander"], expanded=True):
-        m_col1, m_col2, m_col3, m_col4 = st.columns([1.5, 2, 1, 1])
-
-        with m_col1:
-            selected_cat = st.selectbox(t["select_cat"], list(MATERIAL_MASTER_DB.keys()))
-
-        with m_col2:
-            materials_in_cat = list(MATERIAL_MASTER_DB[selected_cat].keys())
-            selected_mat_item = st.selectbox(t["select_item"], materials_in_cat)
-
-        unit_price = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
-        unit_cost = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
-
-        with m_col3:
-            mat_qty = st.number_input(t["mat_qty"], min_value=1.0, value=1.0, step=1.0)
-            st.caption(f"Price: ฿{unit_price:,.2f} | Cost: ฿{unit_cost:,.2f}")
-
-        with m_col4:
-            st.write(" ")
-            st.write(" ")
-            if st.button(t["add_mat_btn"], use_container_width=True):
-                new_item = {
-                    "cat": selected_cat,
-                    "name": selected_mat_item,
-                    "qty": mat_qty,
-                    "unit_price": unit_price,
-                    "unit_cost": unit_cost,
-                    "total_price": unit_price * mat_qty,
-                    "total_cost": unit_cost * mat_qty
-                }
-                st.session_state["selected_materials"].append(new_item)
-                st.toast(f"Added {selected_mat_item} x {mat_qty}")
-
-    if st.session_state["selected_materials"]:
-        st.markdown(f"###### {t['selected_mat_list']}")
-        mat_df = pd.DataFrame(st.session_state["selected_materials"])
-
-        display_df = mat_df[["cat", "name", "qty", "unit_price", "total_price"]].copy()
-        display_df.columns = ["Category / หมวดหมู่", "Material / ชื่อวัสดุ", "Qty / จำนวน", "Unit Price / ราคา", "Total / ราคารวม"]
-        st.dataframe(display_df, use_container_width=True)
-
-        col_clear, col_stat = st.columns([1, 3])
-        with col_clear:
-            if st.button(t["clear_mat_btn"]):
-                st.session_state["selected_materials"] = []
-                st.rerun()
-
-    # ==========================================
-    # 🎨 งานเคลือบผิว & งานทำสี (Hardcoat & Painting)
-    # ==========================================
-    st.markdown("---")
-    st.markdown(f"##### {t['finishing_title']}")
-    c_hc1, c_hc2 = st.columns(2)
-
-    with c_hc1:
-        selected_hardcoat = st.selectbox(t["hardcoat_select"], list(HARDCOAT_RATES.keys()))
-        hardcoat_rate = HARDCOAT_RATES[selected_hardcoat]
-        hardcoat_cost = hardcoat_rate * calc_area
-        st.caption(t["rate_label"].format(hardcoat_rate, hardcoat_cost))
-
-    with c_hc2:
-        selected_color = st.selectbox(t["color_select"], list(COLOR_RATES.keys()))
-        color_rate = COLOR_RATES[selected_color]
-        color_cost = color_rate * calc_area
-        st.caption(t["rate_label"].format(color_rate, color_cost))
-
-    # ==========================================
-    # 🧮 การคำนวณสรุปราคาและต้นทุนรวม
-    # ==========================================
-    st.markdown("---")
-    st.subheader(t["summary_title"])
-
-    machine_total = sum(op["total"] for op in st.session_state["selected_operations"])
-
-    material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
-    finishing_total = hardcoat_cost + color_cost
-
-    subtotal = machine_total + material_total_price + finishing_total
-
-    col_res1, col_res2, col_res3 = st.columns(3)
-    col_res1.metric(t["mch_cost"], f"฿{machine_total:,.2f}")
-    col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
-    col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
-
-    st.markdown(f"### {t['grand_total']}")
-    st.title(f"฿ {subtotal:,.2f} THB")
-    # ==========================================
-    # 🧮 การคำนวณสรุปราคาและต้นทุนรวม
-    # ==========================================
-    st.markdown("---")
-    st.subheader(t["summary_title"])
-
-    machine_total = sum(op["total"] for op in st.session_state["selected_operations"])
-    material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
-    material_total_cost = sum(item["total_cost"] for item in st.session_state["selected_materials"])
-    finishing_total = hardcoat_cost + color_cost
-
-    subtotal = machine_total + material_total_price + finishing_total
-
-    col_opt1, col_opt2 = st.columns(2)
-    with col_opt1:
-        discount_percent = st.number_input("ส่วนลด (%) / Discount (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-    with col_opt2:
-        vat_include = st.checkbox("รวมภาษีมูลค่าเพิ่ม (VAT 7%)", value=True)
-
-    discount_amount = subtotal * (discount_percent / 100.0)
-    net_total = subtotal - discount_amount
-    vat_amount = (net_total * 0.07) if vat_include else 0.0
-    grand_total = net_total + vat_amount
-
-    col_res1, col_res2, col_res3 = st.columns(3)
-    col_res1.metric(t["mch_cost"], f"฿{machine_total:,.2f}")
-    col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
-    col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
-
-    st.markdown("---")
-    
-    col_sum1, col_sum2 = st.columns(2)
-    with col_sum1:
-        st.write(f"**ราคารวมค่าบริการและวัสดุ (Subtotal):** ฿{subtotal:,.2f}")
-        if discount_amount > 0:
-            st.write(f"**ส่วนลด ({discount_percent}%):** -฿{discount_amount:,.2f}")
-        if vat_include:
-            st.write(f"**ภาษีมูลค่าเพิ่ม (VAT 7%):** ฿{vat_amount:,.2f}")
-
-    with col_sum2:
-        st.markdown(f"### {t['grand_total']}")
-        st.title(f"฿ {grand_total:,.2f} THB")
-
-    # ==========================================
-    # 📄 ส่วนสรุปใบเสนอราคา & ส่งออกข้อมูล
-    # ==========================================
-    st.markdown("---")
-    st.subheader("📋 ใบเสนอราคา / Quotation Breakdown")
-    
-    summary_data = {
-        "รายการ (Item)": [
-            "ค่าการทำงานของเครื่องจักร (Machine Operations)",
-            "ค่าวัสดุ Master Data (Materials)",
-            "งานเคลือบผิว (Hardcoat Finish)",
-            "งานทำสี (Color Finish)",
-            "ส่วนลด (Discount)",
-            "ภาษีมูลค่าเพิ่ม (VAT 7%)"
-        ],
-        "จำนวนเงิน (THB)": [
-            f"฿{machine_total:,.2f}",
-            f"฿{material_total_price:,.2f}",
-            f"฿{hardcoat_cost:,.2f}",
-            f"฿{color_cost:,.2f}",
-            f"-฿{discount_amount:,.2f}",
-            f"฿{vat_amount:,.2f}"
-        ]
+# ==========================================
+# 📦 1. MATERIAL & MACHINE MASTER DATABASE
+# (ปรับเพิ่มข้อมูลวัสดุและราคาให้ครบถ้วน)
+# ==========================================
+MATERIAL_MASTER_DB = {
+    "Acrylic / อะคริลิค": {
+        "แผ่นอะคริลิคใส 3mm (120x240cm)": {"price": 1200.0, "cost": 850.0},
+        "แผ่นอะคริลิคใส 5mm (120x240cm)": {"price": 1800.0, "cost": 1300.0},
+        "แผ่นอะคริลิคสี 3mm (120x240cm)": {"price": 1350.0, "cost": 950.0},
+        "แผ่นอะคริลิคสี 5mm (120x240cm)": {"price": 2000.0, "cost": 1450.0},
+    },
+    "3D Printing Filament & Resin": {
+        "PLA/ABS Filament (1kg/Spool)": {"price": 750.0, "cost": 450.0},
+        "PETG Filament (1kg/Spool)": {"price": 900.0, "cost": 550.0},
+        "Standard Photopolymer Resin (1L)": {"price": 1400.0, "cost": 900.0},
+        "High-Temp Tough Resin (1L)": {"price": 2800.0, "cost": 1900.0},
+    },
+    "Metal & Structural Steel / โลหะและเหล็ก": {
+        "ท่อเหล็กดัดโค้ง 1 นิ้ว (ท่อน 6m)": {"price": 450.0, "cost": 280.0},
+        "เหล็กกล่อง 2x1 นิ้ว (ท่อน 6m)": {"price": 520.0, "cost": 340.0},
+        "แผ่นสแตนเลส 304 1.5mm (120x240cm)": {"price": 3200.0, "cost": 2300.0},
+        "แผ่นอลูมิเนียม 2mm (120x240cm)": {"price": 2400.0, "cost": 1700.0},
+    },
+    "Sticker & Vinyl / งานสติ๊กเกอร์": {
+        "สติ๊กเกอร์ PVC ไดคัท (sq.m.)": {"price": 350.0, "cost": 180.0},
+        "สติ๊กเกอร์ 3M พิมพ์ลาย + เคลือบ (sq.m.)": {"price": 650.0, "cost": 380.0},
+        "สติ๊กเกอร์โปร่งแสง Translucent (sq.m.)": {"price": 450.0, "cost": 250.0},
+    },
+    "Hardware & Fasteners / อุปกรณ์ประกอบ": {
+        "ชุดน็อตและพุกยึดโครงสร้าง (Set)": {"price": 150.0, "cost": 80.0},
+        "กาวอะคริลิค / น้ำยาเชื่อมอะคริลิค (Kgt)": {"price": 250.0, "cost": 140.0},
+        "หมุดลอยสแตนเลสยึดป้าย (Pack 4 ชิ้น)": {"price": 200.0, "cost": 110.0},
     }
-    
-    st.table(pd.DataFrame(summary_data))
+}
 
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("🔄 รีเซ็ตข้อมูลทั้งหมด / Reset All", use_container_width=True):
+# ------------------------------------------
+# การรับค่าเริ่มต้นและตรวจสอบ Session State
+# ------------------------------------------
+if "selected_operations" not in st.session_state:
+    st.session_state["selected_operations"] = []
+
+if "selected_materials" not in st.session_state:
+    st.session_state["selected_materials"] = []
+
+# ==========================================
+# ⚙️ 2. ระบบเลือกเครื่องจักร (Machine Operations)
+# ==========================================
+st.markdown(f"##### {t.get('op_title', 'งานเครื่องจักรและกระบวนการผลิต (Machine Operations)')}")
+o_col1, o_col2, o_col3, o_col4 = st.columns([2, 1.5, 1.5, 1])
+
+with o_col1:
+    selected_machine = st.selectbox(t["op_select_machine"], list(MACHINE_TYPES.keys()))
+
+op_unit = MACHINE_TYPES[selected_machine]  # "Baht/Hr." หรือ "Baht/Unit"
+default_rate = MACHINE_DEFAULT_RATES.get(selected_machine, 0)
+
+with o_col2:
+    op_rate = st.number_input(
+        f"{t['op_rate']} ({op_unit})",
+        min_value=0.0, value=float(default_rate), step=10.0
+    )
+
+with o_col3:
+    if op_unit == "Baht/Hr.":
+        if selected_machine == "Robot":
+            suggested_qty = round(calc_area * LEVEL_FACTORS.get(complexity_level, 5.0), 2)
+        else:
+            suggested_qty = 1.0
+        op_qty = st.number_input(t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5)
+    else:  # Baht/Unit (เช่น 3D Print SLA)
+        op_qty = st.number_input(t["op_qty_unit"], min_value=0.0, value=1.0, step=1.0)
+
+with o_col4:
+    st.write(" ")
+    st.write(" ")
+    if st.button(t["op_add_btn"], use_container_width=True, key="add_op_btn"):
+        new_op = {
+            "machine": selected_machine,
+            "unit": op_unit,
+            "rate": op_rate,
+            "qty": op_qty,
+            "total": op_rate * op_qty,
+        }
+        st.session_state["selected_operations"].append(new_op)
+        st.toast(f"เพิ่มรายการ {selected_machine} จำนวน {op_qty} {op_unit} สำเร็จ")
+
+# ตารางแสดงรายการเครื่องจักรที่เลือก
+if st.session_state["selected_operations"]:
+    st.markdown(f"###### {t['op_selected_list']}")
+    ops_df = pd.DataFrame(st.session_state["selected_operations"])
+    display_ops_df = ops_df[["machine", "unit", "rate", "qty", "total"]].copy()
+    display_ops_df.columns = [
+        t["op_col_machine"], t["op_col_unit"], t["op_col_rate"], t["op_col_qty"], t["op_col_total"]
+    ]
+    st.dataframe(display_ops_df, use_container_width=True)
+
+    col_clear_op, _ = st.columns([1, 3])
+    with col_clear_op:
+        if st.button(t["op_clear_btn"], key="clear_ops_btn"):
             st.session_state["selected_operations"] = []
+            st.rerun()
+
+# ==========================================
+# 📦 3. ระบบเลือกวัสดุ (Material Selection)
+# ==========================================
+st.markdown("---")
+st.markdown(f"##### {t['use_mat']}")
+
+with st.expander(t["mat_expander"], expanded=True):
+    m_col1, m_col2, m_col3, m_col4 = st.columns([1.5, 2, 1, 1])
+
+    with m_col1:
+        selected_cat = st.selectbox(t["select_cat"], list(MATERIAL_MASTER_DB.keys()))
+
+    with m_col2:
+        materials_in_cat = list(MATERIAL_MASTER_DB[selected_cat].keys())
+        selected_mat_item = st.selectbox(t["select_item"], materials_in_cat)
+
+    unit_price = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
+    unit_cost = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
+
+    with m_col3:
+        mat_qty = st.number_input(t["mat_qty"], min_value=1.0, value=1.0, step=1.0)
+        st.caption(f"ราคาขาย: ฿{unit_price:,.2f} | ต้นทุน: ฿{unit_cost:,.2f}")
+
+    with m_col4:
+        st.write(" ")
+        st.write(" ")
+        if st.button(t["add_mat_btn"], use_container_width=True, key="add_mat_btn"):
+            new_item = {
+                "cat": selected_cat,
+                "name": selected_mat_item,
+                "qty": mat_qty,
+                "unit_price": unit_price,
+                "unit_cost": unit_cost,
+                "total_price": unit_price * mat_qty,
+                "total_cost": unit_cost * mat_qty
+            }
+            st.session_state["selected_materials"].append(new_item)
+            st.toast(f"เพิ่มวัสดุ {selected_mat_item} จำนวน {mat_qty} รายการสำเร็จ")
+
+# ตารางแสดงรายการวัสดุที่เลือก
+if st.session_state["selected_materials"]:
+    st.markdown(f"###### {t['selected_mat_list']}")
+    mat_df = pd.DataFrame(st.session_state["selected_materials"])
+    display_df = mat_df[["cat", "name", "qty", "unit_price", "total_price"]].copy()
+    display_df.columns = ["หมวดหมู่ / Category", "ชื่อวัสดุ / Material", "จำนวน / Qty", "ราคาต่อหน่วย / Price", "ราคารวม / Total"]
+    st.dataframe(display_df, use_container_width=True)
+
+    col_clear_mat, _ = st.columns([1, 3])
+    with col_clear_mat:
+        if st.button(t["clear_mat_btn"], key="clear_mats_btn"):
             st.session_state["selected_materials"] = []
             st.rerun()
 
-    with col_btn2:
-        export_payload = {
-            "project_name": project_name,
-            "dimensions": st.session_state.get("dimensions_str", ""),
-            "surface_area_sqm": calc_area,
-            "complexity_level": complexity_level,
-            "operations": st.session_state["selected_operations"],
-            "materials": st.session_state["selected_materials"],
-            "finishing": {
-                "hardcoat": selected_hardcoat,
-                "color": selected_color
-            },
-            "financial_summary": {
-                "subtotal": subtotal,
-                "discount_amount": discount_amount,
-                "vat_amount": vat_amount,
-                "grand_total": grand_total
-            }
+# ==========================================
+# 🎨 4. งานเคลือบผิว & ทำสี (Finishing)
+# ==========================================
+st.markdown("---")
+st.markdown(f"##### {t['finishing_title']}")
+c_hc1, c_hc2 = st.columns(2)
+
+with c_hc1:
+    selected_hardcoat = st.selectbox(t["hardcoat_select"], list(HARDCOAT_RATES.keys()))
+    hardcoat_rate = HARDCOAT_RATES[selected_hardcoat]
+    hardcoat_cost = hardcoat_rate * calc_area
+    st.caption(t["rate_label"].format(hardcoat_rate, hardcoat_cost))
+
+with c_hc2:
+    selected_color = st.selectbox(t["color_select"], list(COLOR_RATES.keys()))
+    color_rate = COLOR_RATES[selected_color]
+    color_cost = color_rate * calc_area
+    st.caption(t["rate_label"].format(color_rate, color_cost))
+
+# ==========================================
+# 🧮 5. การคำนวณและสรุปราคารวมจุดเดียว (Uncombined Total Calculation)
+# ==========================================
+st.markdown("---")
+st.subheader(t["summary_title"])
+
+# คำนวณยอดรวมของแต่ละหมวดหมู่ (คำนวณเพียงครั้งเดียวเพื่อไม่ให้ซ้ำซ้อน)
+machine_total = sum(op["total"] for op in st.session_state["selected_operations"])
+material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
+material_total_cost = sum(item["total_cost"] for item in st.session_state["selected_materials"])
+finishing_total = hardcoat_cost + color_cost
+
+# ราคารวมก่อนส่วนลดและภาษี
+subtotal = machine_total + material_total_price + finishing_total
+
+col_opt1, col_opt2 = st.columns(2)
+with col_opt1:
+    discount_percent = st.number_input("ส่วนลด (%) / Discount (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+with col_opt2:
+    vat_include = st.checkbox("รวมภาษีมูลค่าเพิ่ม (VAT 7%)", value=True)
+
+# คำนวณภาษีและส่วนลด
+discount_amount = subtotal * (discount_percent / 100.0)
+net_total = subtotal - discount_amount
+vat_amount = (net_total * 0.07) if vat_include else 0.0
+grand_total = net_total + vat_amount
+
+# แสดงการกระจายต้นทุนหลัก
+col_res1, col_res2, col_res3 = st.columns(3)
+col_res1.metric(t["mch_cost"], f"฿{machine_total:,.2f}")
+col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
+col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
+
+st.markdown("---")
+
+col_sum1, col_sum2 = st.columns(2)
+with col_sum1:
+    st.write(f"**ราคารวมค่าบริการและวัสดุ (Subtotal):** ฿{subtotal:,.2f}")
+    if discount_amount > 0:
+        st.write(f"**ส่วนลด ({discount_percent}%):** -฿{discount_amount:,.2f}")
+    if vat_include:
+        st.write(f"**ภาษีมูลค่าเพิ่ม (VAT 7%):** ฿{vat_amount:,.2f}")
+
+with col_sum2:
+    st.markdown(f"### {t['grand_total']}")
+    st.title(f"฿ {grand_total:,.2f} THB")
+
+# ==========================================
+# 📋 6. ใบเสนอราคา & การดาวน์โหลด (Quotation Output)
+# ==========================================
+st.markdown("---")
+st.subheader("📋 ใบเสนอราคา / Quotation Breakdown")
+
+summary_table = {
+    "รายการ (Item)": [
+        "ค่าการทำงานของเครื่องจักร (Machine Operations)",
+        "ค่าวัสดุ (Material Total)",
+        "งานเคลือบผิว (Hardcoat Finish)",
+        "งานทำสี (Color Finish)",
+        "ส่วนลด (Discount)",
+        "ภาษีมูลค่าเพิ่ม (VAT 7%)"
+    ],
+    "จำนวนเงิน (THB)": [
+        f"฿{machine_total:,.2f}",
+        f"฿{material_total_price:,.2f}",
+        f"฿{hardcoat_cost:,.2f}",
+        f"฿{color_cost:,.2f}",
+        f"-฿{discount_amount:,.2f}",
+        f"฿{vat_amount:,.2f}"
+    ]
+}
+
+st.table(pd.DataFrame(summary_table))
+
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    if st.button("🔄 รีเซ็ตข้อมูลทั้งหมด / Reset All", use_container_width=True, key="reset_all_btn"):
+        st.session_state["selected_operations"] = []
+        st.session_state["selected_materials"] = []
+        st.rerun()
+
+with col_btn2:
+    export_payload = {
+        "project_name": project_name,
+        "dimensions": st.session_state.get("dimensions_str", ""),
+        "surface_area_sqm": calc_area,
+        "complexity_level": complexity_level,
+        "operations": st.session_state["selected_operations"],
+        "materials": st.session_state["selected_materials"],
+        "finishing": {
+            "hardcoat": selected_hardcoat,
+            "color": selected_color
+        },
+        "financial_summary": {
+            "subtotal": subtotal,
+            "discount_amount": discount_amount,
+            "vat_amount": vat_amount,
+            "grand_total": grand_total,
+            "material_cost_internal": material_total_cost
         }
-        
-        st.download_button(
-            label="💾 บันทึกใบประเมินราคา (JSON)",
-            data=pd.Series(export_payload).to_json(indent=4, force_ascii=False),
-            file_name=f"quotation_{project_name}.json",
-            mime="application/json",
-            use_container_width=True
-        )
+    }
+
+    st.download_button(
+        label="💾 บันทึกใบประเมินราคา (JSON)",
+        data=json.dumps(export_payload, ensure_ascii=False, indent=4),
+        file_name=f"quotation_{project_name}.json",
+        mime="application/json",
+        use_container_width=True
+    )
