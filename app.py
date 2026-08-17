@@ -99,9 +99,18 @@ st.markdown("""
         border-radius: 8px;
         width: 100%;
         margin: 0;
+        display: flex;
+        align-items: center;
     }
-    section[data-testid="stSidebar"] div[data-testid="stRadio"] label > div:first-child {
-        display: none;  /* hide the default radio dot */
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label > div:last-child {
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label > div:first-child,
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label [data-baseweb="radio"],
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label [data-baseweb="radio"] > div,
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label svg {
+        display: none !important;  /* hide the default radio dot, whichever DOM shape Streamlit renders */
     }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {
         background: #EADFCC;
@@ -800,6 +809,9 @@ elif page == t["page_2_name"]:
         "เรซินใสหล่อพิเศษ 1kg": {"price": 350, "cost": 290},
         "เรซินใสหล่อพิเศษ 5kg": {"price": 960, "cost": 800},
         "Crystal resin": {"price": 1700, "cost": 1415},
+        "PETG": {"price": 960, "cost": 800},
+        "เรซินใสหล่อพิเศษ 230kg": {"price": 34800, "cost": 29000},
+        "เจลโค้ดเชื่อมเรซิ่น 25 kg": {"price": 4500, "cost": 3750},
     },
     "หมวด อะคริลิค (Acrylic)": {
         "อะคริลิคใส 1.5 3*6 ฟุต": {"price": 576, "cost": 480},
@@ -819,6 +831,7 @@ elif page == t["page_2_name"]:
         "แผ่นอะครีลิค 6 มม.": {"price": 6240, "cost": 5200},
         "แผ่นอะคลิลิกใส 5mm": {"price": 5000, "cost": 4160},
         "อะคริลิค 12 มม.": {"price": 5712, "cost": 4760},
+        "อะคริลิคใส 8 มม.": {"price": 4200, "cost": 3500},
     },
     "หมวด ไม้ / MDF / HMR / พลาสวูด": {
         "MDF 6 mm.": {"price": 300, "cost": 250},
@@ -853,6 +866,10 @@ elif page == t["page_2_name"]:
         "Plastwood 15 mm.": {"price": 1800, "cost": 1500},
         "Plastwood 20 mm.": {"price": 2400, "cost": 2000},
         "Plastwood 25 mm.": {"price": 3000, "cost": 2500},
+        "Plastwood 8 mm.": {"price": 960, "cost": 800},
+        "ไม้อัดแท้ 270*270*1000": {"price": 0, "cost": 0},
+        "ไม้อัดกันน้ำ 20mm": {"price": 1500, "cost": 1200},
+        "Veneer 1 ตร.ม.": {"price": 1248, "cost": 1040},
     },
     "หมวด เหล็ก / สแตนเลส / โลหะ": {
         "เหล็กแผ่น 1 มม.": {"price": 850, "cost": 850},
@@ -875,6 +892,22 @@ elif page == t["page_2_name"]:
         "เหล็กท่อกลม 8 มม.": {"price": 120, "cost": 100},
         "เหล็กท่อกลม 6 นิ้ว": {"price": 1800, "cost": 1800},
         "เหล็กท่อกลม 20mm": {"price": 480, "cost": 400},
+        "เหล็กเส้นกลม 15มม. 10ม.": {"price": 540, "cost": 450},
+        "ท่อ Stainless 5 mm.": {"price": 72, "cost": 60},
+        "เหล็กกล่อง 4*4 นิ้ว": {"price": 2040, "cost": 1700},
+        "ตะแกรง Wiremesh 2*50 m. (0.2*0.2 m.)": {"price": 3000, "cost": 2500},
+        "Stainless 2 mm.": {"price": 5400, "cost": 4500},
+        "Stainless 0.7 mm.": {"price": 2520, "cost": 2100},
+        "Stainless HL 1.2 mm.": {"price": 3000, "cost": 2500},
+        "Stainless mirror 2 mm.": {"price": 4560, "cost": 3800},
+        "เหล็กกล่อง 1*1": {"price": 240, "cost": 200},
+        "เหล็กกล่อง 1*2 นิ้ว": {"price": 720, "cost": 600},
+        "เหล็กกล่อง 1.5*1.5": {"price": 840, "cost": 700},
+        "เหล็กกล่อง 2*2": {"price": 1080, "cost": 900},
+        "เหล็กกล่อง 2*4": {"price": 780, "cost": 650},
+        "เหล็กกล่อง 2.5*2.5": {"price": 1560, "cost": 1300},
+        "สแตนเลสแท่ง 10 มม.": {"price": 360, "cost": 300},
+        "เหล็กกัลวาไนซ์": {"price": 1000, "cost": 800},
         "ท่อเหล็ก 1 นิ้ว": {"price": 216, "cost": 180},
         "ท่อเหล็ก 90 มม.": {"price": 5400, "cost": 4500},
         "ท่อเหล็ก 100 มม.": {"price": 6240, "cost": 5200},
@@ -907,6 +940,8 @@ elif page == t["page_2_name"]:
         "ลามิเนตลายหินอ่อน": {"price": 1500, "cost": 1250},
         "Interior film ลายหินอ่อน 1*1 m.": {"price": 480, "cost": 400},
         "แผ่นปิดทอง ( 1 ตร.ม. )": {"price": 168, "cost": 140},
+        "Texture ( 26A )": {"price": 340, "cost": 272},
+        "พิมพ์ UV (ละเอียด/เงา/ด้าน) 1 ตร.ม.": {"price": 2160, "cost": 1800},
     },
     "หมวด ระบบไฟ / อุปกรณ์ไฟฟ้า": {
         "Strip light ( 1 m. )": {"price": 132, "cost": 110},
@@ -916,6 +951,8 @@ elif page == t["page_2_name"]:
         "หม้อแปลง strip light": {"price": 1500, "cost": 1500},
         "Neon flex 12V ( 1 m.)": {"price": 180, "cost": 150},
         "Track light 4000K": {"price": 1800, "cost": 1500},
+        "โคมไฟกลม Ø 500": {"price": 2400, "cost": 2000},
+        "ไฟ LED เส้น": {"price": 360, "cost": 300},
         "หลอดไฟกลม E27 Warm": {"price": 180, "cost": 150},
         "Light box 1 set": {"price": 5500, "cost": 4580},
         "Light box 10 set": {"price": 4500, "cost": 3750},
@@ -947,6 +984,26 @@ elif page == t["page_2_name"]:
         "ทุ่งดอกหญ้า 1 ตร.ม.": {"price": 120, "cost": 100},
         "มือจับฝัง": {"price": 200, "cost": 165},
         "ลวดดัดโครง 4mm": {"price": 240, "cost": 200},
+        "บานพับแสตนเลส": {"price": 200, "cost": 160},
+        "มือจับฝัง": {"price": 200, "cost": 160},
+        "กระจกใส 2 มม. 0.6*1.2 ม.": {"price": 1800, "cost": 1500},
+        "กระจกเงา 5mm": {"price": 4500, "cost": 3600},
+        "เชือกใย 20 มม. (200 ม.)": {"price": 6600, "cost": 5500},
+        "เชือก 16 มม. (200 ม.)": {"price": 3720, "cost": 3100},
+        "สลิง 2.5 มม. ( 1 เมตร )": {"price": 24, "cost": 20},
+        "ผ้าสักหลาด 1 ตร.ม.": {"price": 180, "cost": 150},
+        "มอสเทียม 1 ตร.ม.": {"price": 180, "cost": 150},
+        "ท่อเหล็ก OD 1.5 นิ้ว": {"price": 420, "cost": 350},
+        "ผ้าปริ้นสี": {"price": 1000, "cost": 800},
+        "ผ้าอัดกาว": {"price": 500, "cost": 400},
+        "ก้านพลาสติก 22มม. 1 ม.": {"price": 300, "cost": 250},
+        "ท่ออลูมิเนียม 1 นิ้ว": {"price": 1680, "cost": 1400},
+        "ผ้าหน่วงกันไฟ 1 ตร.ม.": {"price": 960, "cost": 800},
+        "ปี๊ปทินเนอร์ 9.5 กิโล": {"price": 1260, "cost": 1050},
+        "แว่นหมวกันน็อค ชิลด์ดำ": {"price": 600, "cost": 500},
+        "พวงมาลัยสำเร็จรูป": {"price": 96, "cost": 80},
+        "สกรูหกเหลี่ยม 3m": {"price": 360, "cost": 300},
+        "ผ้า plush (1/sqm.)": {"price": 0, "cost": 0},
     }
 }
 
@@ -1144,107 +1201,3 @@ elif page == t["page_2_name"]:
 
     st.markdown(f"### {t['grand_total']}")
     st.title(f"฿ {subtotal:,.2f} THB")
-    # ==========================================
-    # 🧮 การคำนวณสรุปราคาและต้นทุนรวม
-    # ==========================================
-    st.markdown("---")
-    st.subheader(t["summary_title"])
-
-    machine_total = sum(op["total"] for op in st.session_state["selected_operations"])
-    material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
-    material_total_cost = sum(item["total_cost"] for item in st.session_state["selected_materials"])
-    finishing_total = hardcoat_cost + color_cost
-
-    subtotal = machine_total + material_total_price + finishing_total
-
-    col_opt1, col_opt2 = st.columns(2)
-    with col_opt1:
-        discount_percent = st.number_input("ส่วนลด (%) / Discount (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-    with col_opt2:
-        vat_include = st.checkbox("รวมภาษีมูลค่าเพิ่ม (VAT 7%)", value=True)
-
-    discount_amount = subtotal * (discount_percent / 100.0)
-    net_total = subtotal - discount_amount
-    vat_amount = (net_total * 0.07) if vat_include else 0.0
-    grand_total = net_total + vat_amount
-
-    col_res1, col_res2, col_res3 = st.columns(3)
-    col_res1.metric(t["mch_cost"], f"฿{machine_total:,.2f}")
-    col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
-    col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
-
-    st.markdown("---")
-    
-    col_sum1, col_sum2 = st.columns(2)
-    with col_sum1:
-        st.write(f"**ราคารวมค่าบริการและวัสดุ (Subtotal):** ฿{subtotal:,.2f}")
-        if discount_amount > 0:
-            st.write(f"**ส่วนลด ({discount_percent}%):** -฿{discount_amount:,.2f}")
-        if vat_include:
-            st.write(f"**ภาษีมูลค่าเพิ่ม (VAT 7%):** ฿{vat_amount:,.2f}")
-
-    with col_sum2:
-        st.markdown(f"### {t['grand_total']}")
-        st.title(f"฿ {grand_total:,.2f} THB")
-
-    # ==========================================
-    # 📄 ส่วนสรุปใบเสนอราคา & ส่งออกข้อมูล
-    # ==========================================
-    st.markdown("---")
-    st.subheader("📋 ใบเสนอราคา / Quotation Breakdown")
-    
-    summary_data = {
-        "รายการ (Item)": [
-            "ค่าการทำงานของเครื่องจักร (Machine Operations)",
-            "ค่าวัสดุ Master Data (Materials)",
-            "งานเคลือบผิว (Hardcoat Finish)",
-            "งานทำสี (Color Finish)",
-            "ส่วนลด (Discount)",
-            "ภาษีมูลค่าเพิ่ม (VAT 7%)"
-        ],
-        "จำนวนเงิน (THB)": [
-            f"฿{machine_total:,.2f}",
-            f"฿{material_total_price:,.2f}",
-            f"฿{hardcoat_cost:,.2f}",
-            f"฿{color_cost:,.2f}",
-            f"-฿{discount_amount:,.2f}",
-            f"฿{vat_amount:,.2f}"
-        ]
-    }
-    
-    st.table(pd.DataFrame(summary_data))
-
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("🔄 รีเซ็ตข้อมูลทั้งหมด / Reset All", use_container_width=True):
-            st.session_state["selected_operations"] = []
-            st.session_state["selected_materials"] = []
-            st.rerun()
-
-    with col_btn2:
-        export_payload = {
-            "project_name": project_name,
-            "dimensions": st.session_state.get("dimensions_str", ""),
-            "surface_area_sqm": calc_area,
-            "complexity_level": complexity_level,
-            "operations": st.session_state["selected_operations"],
-            "materials": st.session_state["selected_materials"],
-            "finishing": {
-                "hardcoat": selected_hardcoat,
-                "color": selected_color
-            },
-            "financial_summary": {
-                "subtotal": subtotal,
-                "discount_amount": discount_amount,
-                "vat_amount": vat_amount,
-                "grand_total": grand_total
-            }
-        }
-        
-        st.download_button(
-            label="💾 บันทึกใบประเมินราคา (JSON)",
-            data=pd.Series(export_payload).to_json(indent=4, force_ascii=False),
-            file_name=f"quotation_{project_name}.json",
-            mime="application/json",
-            use_container_width=True
-        )
