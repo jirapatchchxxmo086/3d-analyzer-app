@@ -1144,3 +1144,107 @@ elif page == t["page_2_name"]:
 
     st.markdown(f"### {t['grand_total']}")
     st.title(f"฿ {subtotal:,.2f} THB")
+    # ==========================================
+    # 🧮 การคำนวณสรุปราคาและต้นทุนรวม
+    # ==========================================
+    st.markdown("---")
+    st.subheader(t["summary_title"])
+
+    machine_total = sum(op["total"] for op in st.session_state["selected_operations"])
+    material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
+    material_total_cost = sum(item["total_cost"] for item in st.session_state["selected_materials"])
+    finishing_total = hardcoat_cost + color_cost
+
+    subtotal = machine_total + material_total_price + finishing_total
+
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        discount_percent = st.number_input("ส่วนลด (%) / Discount (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+    with col_opt2:
+        vat_include = st.checkbox("รวมภาษีมูลค่าเพิ่ม (VAT 7%)", value=True)
+
+    discount_amount = subtotal * (discount_percent / 100.0)
+    net_total = subtotal - discount_amount
+    vat_amount = (net_total * 0.07) if vat_include else 0.0
+    grand_total = net_total + vat_amount
+
+    col_res1, col_res2, col_res3 = st.columns(3)
+    col_res1.metric(t["mch_cost"], f"฿{machine_total:,.2f}")
+    col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
+    col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
+
+    st.markdown("---")
+    
+    col_sum1, col_sum2 = st.columns(2)
+    with col_sum1:
+        st.write(f"**ราคารวมค่าบริการและวัสดุ (Subtotal):** ฿{subtotal:,.2f}")
+        if discount_amount > 0:
+            st.write(f"**ส่วนลด ({discount_percent}%):** -฿{discount_amount:,.2f}")
+        if vat_include:
+            st.write(f"**ภาษีมูลค่าเพิ่ม (VAT 7%):** ฿{vat_amount:,.2f}")
+
+    with col_sum2:
+        st.markdown(f"### {t['grand_total']}")
+        st.title(f"฿ {grand_total:,.2f} THB")
+
+    # ==========================================
+    # 📄 ส่วนสรุปใบเสนอราคา & ส่งออกข้อมูล
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📋 ใบเสนอราคา / Quotation Breakdown")
+    
+    summary_data = {
+        "รายการ (Item)": [
+            "ค่าการทำงานของเครื่องจักร (Machine Operations)",
+            "ค่าวัสดุ Master Data (Materials)",
+            "งานเคลือบผิว (Hardcoat Finish)",
+            "งานทำสี (Color Finish)",
+            "ส่วนลด (Discount)",
+            "ภาษีมูลค่าเพิ่ม (VAT 7%)"
+        ],
+        "จำนวนเงิน (THB)": [
+            f"฿{machine_total:,.2f}",
+            f"฿{material_total_price:,.2f}",
+            f"฿{hardcoat_cost:,.2f}",
+            f"฿{color_cost:,.2f}",
+            f"-฿{discount_amount:,.2f}",
+            f"฿{vat_amount:,.2f}"
+        ]
+    }
+    
+    st.table(pd.DataFrame(summary_data))
+
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("🔄 รีเซ็ตข้อมูลทั้งหมด / Reset All", use_container_width=True):
+            st.session_state["selected_operations"] = []
+            st.session_state["selected_materials"] = []
+            st.rerun()
+
+    with col_btn2:
+        export_payload = {
+            "project_name": project_name,
+            "dimensions": st.session_state.get("dimensions_str", ""),
+            "surface_area_sqm": calc_area,
+            "complexity_level": complexity_level,
+            "operations": st.session_state["selected_operations"],
+            "materials": st.session_state["selected_materials"],
+            "finishing": {
+                "hardcoat": selected_hardcoat,
+                "color": selected_color
+            },
+            "financial_summary": {
+                "subtotal": subtotal,
+                "discount_amount": discount_amount,
+                "vat_amount": vat_amount,
+                "grand_total": grand_total
+            }
+        }
+        
+        st.download_button(
+            label="💾 บันทึกใบประเมินราคา (JSON)",
+            data=pd.Series(export_payload).to_json(indent=4, force_ascii=False),
+            file_name=f"quotation_{project_name}.json",
+            mime="application/json",
+            use_container_width=True
+        )
