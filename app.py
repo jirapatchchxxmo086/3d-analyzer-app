@@ -1142,9 +1142,12 @@ elif page == t["page_2_name"]:
         default_rate = MACHINE_DEFAULT_RATES.get(selected_machine, 0)
 
         with o_col2:
+            # key includes the machine name so switching machines gives a fresh widget
+            # (a fixed key would make Streamlit keep the old rate on rerun and ignore value=).
             op_rate = st.number_input(
                 f"{t['op_rate']} ({op_unit})",
-                min_value=0.0, value=float(default_rate), step=10.0
+                min_value=0.0, value=float(default_rate), step=10.0,
+                key=f"op_rate_{selected_machine}"
             )
 
         with o_col3:
@@ -1155,9 +1158,15 @@ elif page == t["page_2_name"]:
                     suggested_qty = round(calc_area * LEVEL_FACTORS.get(complexity_level, 5.0), 2)
                 else:
                     suggested_qty = 1.0
-                op_qty = st.number_input(t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5)
+                op_qty = st.number_input(
+                    t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
+                    key=f"op_qty_{selected_machine}"
+                )
             else:  # Baht/Unit (e.g. 3D Print SLA)
-                op_qty = st.number_input(t["op_qty_unit"], min_value=0.0, value=1.0, step=1.0)
+                op_qty = st.number_input(
+                    t["op_qty_unit"], min_value=0.0, value=1.0, step=1.0,
+                    key=f"op_qty_{selected_machine}"
+                )
 
         with o_col4:
             st.write(" ")
@@ -1264,7 +1273,7 @@ elif page == t["page_2_name"]:
             with c2:
                 hc_rate = st.number_input(
                     t["finish_rate"], min_value=0.0,
-                    value=float(COAT_PROCESS_RATES[hc_item]), step=10.0, key="hc_rate_coat"
+                    value=float(COAT_PROCESS_RATES[hc_item]), step=10.0, key=f"hc_rate_coat_{hc_item}"
                 )
             with c3:
                 hc_area = st.number_input(
@@ -1305,15 +1314,15 @@ elif page == t["page_2_name"]:
             with c2:
                 hc_rate = st.number_input(
                     f"{t['finish_rate'] if hc_info['billing']=='sq.m.' else ('อัตรา (฿/งาน)' if lang=='TH' else 'Rate (฿/job)')}",
-                    min_value=0.0, value=float(hc_info["rate"]), step=10.0, key="hc_rate_work"
+                    min_value=0.0, value=float(hc_info["rate"]), step=10.0, key=f"hc_rate_work_{hc_item}"
                 )
             with c3:
                 if hc_info["billing"] == "sq.m.":
-                    hc_qty = st.number_input(t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key="hc_qty_work")
+                    hc_qty = st.number_input(t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key=f"hc_qty_work_{hc_item}")
                 else:
                     hc_qty = st.number_input(
                         "จำนวนงาน (ชุด)" if lang == "TH" else "Number of jobs",
-                        min_value=0.0, value=1.0, step=1.0, key="hc_qty_work"
+                        min_value=0.0, value=1.0, step=1.0, key=f"hc_qty_work_{hc_item}"
                     )
             with c4:
                 st.write(" "); st.write(" ")
@@ -1348,7 +1357,7 @@ elif page == t["page_2_name"]:
             with c2:
                 hc_rate = st.number_input(
                     f"{t['finish_rate']} (cost ฿{hc_info['cost']:,} +20%)",
-                    min_value=0.0, value=float(hc_info["price"]), step=10.0, key="hc_rate_color"
+                    min_value=0.0, value=float(hc_info["price"]), step=10.0, key=f"hc_rate_color_{hc_item}"
                 )
             with c3:
                 hc_area = st.number_input(
