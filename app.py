@@ -136,8 +136,8 @@ st.markdown("""
 TEXTS = {
     "TH": {
         "sidebar_menu": "📌 เมนูหลัก",
-        "page_1_name": "📦 หน้า 1: วิเคราะห์โมเดล 3D & พื้นที่ผิว",
-        "page_2_name": "💰 หน้าที่ 2: คำนวณราคา & ใบประเมิน",
+        "page_1_name": "แบบจำลอง 3 มิติและพื้นผิว",
+        "page_2_name": "ประเมินราคา",
         "lang_select": "🌐 เลือกภาษา / Language",
         # Page 1
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
@@ -231,8 +231,8 @@ TEXTS = {
     },
     "EN": {
         "sidebar_menu": "📌 Main Menu",
-        "page_1_name": "📦 Page 1: 3D Model & Surface Analyzer",
-        "page_2_name": "💰 Page 2: Cost Estimator & Quote",
+        "page_1_name": "3D Model & Surface",
+        "page_2_name": "Cost Estimator",
         "lang_select": "🌐 Select Language / เลือกภาษา",
         # Page 1
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
