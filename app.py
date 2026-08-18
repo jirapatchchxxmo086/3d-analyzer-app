@@ -210,6 +210,11 @@ TEXTS = {
         "hardcoat_select": "ประเภท Hardcoat / เคลือบผิว",
         "color_select": "ประเภทการทำสี / ปิดผิว",
         "rate_label": "อัตราค่าบริการ: ฿{:,.2f} / ตร.ม. | ราคารวม: ฿{:,.2f}",
+        "mold_title": "🗿 งานทำโมล (Mold Making)",
+        "mold_select": "ประเภทโมล",
+        "mold_qty": "จำนวนโมล (ชุด)",
+        "mold_rate_label": "อัตรา: ฿{:,.2f}/ตร.ม. × {} โมล × {:.4f} ตร.ม./ชิ้น = ฿{:,.2f}",
+        "mold_cost": "ค่าทำโมล",
         "summary_title": "📊 สรุปประมาณการราคาผลิต (Costing & Price Summary)",
         "mch_cost": "ค่าประมวลผลเครื่องจักร",
         "mat_cost": "ค่าวัสดุและอุปกรณ์",
@@ -292,6 +297,11 @@ TEXTS = {
         "hardcoat_select": "Hardcoat / Coating Type",
         "color_select": "Painting / Surface Finish Type",
         "rate_label": "Service Rate: ฿{:,.2f} / sq.m. | Total Price: ฿{:,.2f}",
+        "mold_title": "🗿 Mold Making",
+        "mold_select": "Mold Type",
+        "mold_qty": "Number of Molds",
+        "mold_rate_label": "Rate: ฿{:,.2f}/sq.m. × {} molds × {:.4f} sq.m./pc = ฿{:,.2f}",
+        "mold_cost": "Mold Cost",
         "summary_title": "📊 Costing & Price Summary",
         "mch_cost": "Machine Processing Cost",
         "mat_cost": "Material & Equipment Cost",
@@ -1014,6 +1024,10 @@ elif page == t["page_2_name"]:
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
     HARDCOAT_RATES = {"None / ไม่มี": 0, "Polyurea": 1350, "Mold Fiber": 1520, "Fiberglass": 1090, "Epoxy": 600}
     COLOR_RATES = {"None / ไม่มี": 0, "Normal": 1440, "Chromium": 4800, "The Code": 1800, "Gold leaves": 168, "Sticker": 1200}
+    # Mold tooling rates (฿/sq.m of mold surface) — from factory "Mold" cost table.
+    # Billed per MOLD (qty of molds made), not per finished piece — a mold's surface
+    # area is ~1 piece's surface area, so cost = rate × mold_qty × per_piece_area.
+    MOLD_RATES = {"None / ไม่มี": 0, "Mold (1 time)": 605, "Mold fiber": 1520, "Mold silicone": 4310}
 
     # 🏭 Machine Master Data — billing unit per machine type (from factory Excel IFS formula).
     # Everything is Baht/Hr. except 3D Print SLA, which bills per finished unit (Baht/Unit).
@@ -1191,6 +1205,23 @@ elif page == t["page_2_name"]:
         st.caption(t["rate_label"].format(color_rate, color_cost))
 
     # ==========================================
+    # 🗿 งานทำโมล (Mold Making) — billed per mold, not per finished piece
+    # ==========================================
+    st.markdown("---")
+    st.markdown(f"##### {t['mold_title']}")
+    c_mold1, c_mold2 = st.columns(2)
+
+    with c_mold1:
+        selected_mold = st.selectbox(t["mold_select"], list(MOLD_RATES.keys()))
+        mold_rate = MOLD_RATES[selected_mold]
+
+    with c_mold2:
+        mold_qty = st.number_input(t["mold_qty"], min_value=0, value=0, step=1)
+
+    mold_cost = mold_rate * mold_qty * per_piece_area
+    st.caption(t["mold_rate_label"].format(mold_rate, mold_qty, per_piece_area, mold_cost))
+
+    # ==========================================
     # 🧮 การคำนวณสรุปราคาและต้นทุนรวม
     # ==========================================
     st.markdown("---")
@@ -1201,12 +1232,13 @@ elif page == t["page_2_name"]:
     material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
     finishing_total = hardcoat_cost + color_cost
 
-    subtotal = machine_total + material_total_price + finishing_total
+    subtotal = machine_total + material_total_price + finishing_total + mold_cost
 
-    col_res1, col_res2, col_res3 = st.columns(3)
+    col_res1, col_res2, col_res3, col_res4 = st.columns(4)
     col_res1.metric(t["mch_cost"], f"฿{machine_total:,.2f}")
     col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
     col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
+    col_res4.metric(t["mold_cost"], f"฿{mold_cost:,.2f}")
 
     st.markdown(f"### {t['grand_total']}")
     st.title(f"฿ {subtotal:,.2f} THB")
