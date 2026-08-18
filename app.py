@@ -1040,26 +1040,50 @@ elif page == t["page_2_name"]:
 }
 
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
-    # Surface finishing rates (฿/sq.m.) — matches the 4 "Type" categories on the
-    # factory estimate sheet's Hard Coat table: Poly&Epoxy, Fiberglass, Color Type, Sticker.
-    # Poly & Epoxy rate defaults to 0 (the reference estimate sheet shows 0 for this
-    # job too) — edit the rate in the UI before adding if your job actually uses it.
-    FINISH_TYPES = {
-        "Poly & Epoxy": 0,
-        "Fiberglass": 1090,
-        "Polyurea": 1350,
-        "Mold Fiber": 1520,
+
+    # ==========================================
+    # 🎨 Hard Coat Master Pricing (จากใบประเมินราคาโรงงานจริง)
+    # ==========================================
+    # ทุกอัตราเป็น ฿/ตร.ม. เว้นแต่จะระบุไว้เป็นอย่างอื่น
+
+    # 1) กระบวนการเคลือบผิว (Coating Process) — คิดตามพื้นที่ทำสี/เคลือบผิวทั้งล็อต
+    COAT_PROCESS_RATES = {
         "Epoxy": 600,
-        "Color - Normal": 1440,
-        "Color - Chromium": 4800,
-        "Color - The Code": 1800,
-        "Color - Gold leaves": 168,
-        "Sticker": 1200,
+        "Polyurea": 1350,
     }
-    # Mold tooling rates (฿/sq.m of mold surface) — from factory "Mold" cost table.
-    # Billed per MOLD (qty of molds made), not per finished piece — a mold's surface
-    # area is ~1 piece's surface area, so cost = rate × mold_qty × per_piece_area.
-    MOLD_RATES = {"None / ไม่มี": 0, "Mold (1 time)": 605, "Mold fiber": 1520, "Mold silicone": 4310}
+
+    # 2) งานทำโมล (Mold) — คิดตามพื้นที่ผิวต่อชิ้น × จำนวนโมล (ไม่ใช่จำนวนชิ้นที่ผลิต)
+    MOLD_RATES = {
+        "None / ไม่มี": 0,
+        "Mold (1 time)": 605,
+        "Mold fiber": 1520,
+        "Mold silicone": 4310,
+    }
+
+    # 3) งาน Work (แรงงานขึ้นรูป/ประกอบ Fiberglass) — ส่วนใหญ่คิดตามพื้นที่, มี 1 รายการที่เหมาราคาเป็นก้อน
+    WORK_RATES = {
+        "Work (฿/ตร.ม.)": {"rate": 1090, "billing": "sq.m."},
+        "หล่อตัน ธรรมดา (เหมาราคา)": {"rate": 280000, "billing": "lump"},
+    }
+
+    # 4) งานสี / Surface Finish — ราคาลูกค้า (price) รวมมาร์จิ้น ~20% เหนือต้นทุนภายใน (cost)
+    COLOR_FINISH_DB = {
+        "Normal":         {"price": 1440, "cost": 1200},
+        "Sticker remove": {"price": 780,  "cost": 650},
+        "Gold leaves":    {"price": 168,  "cost": 140},
+        "Clear":          {"price": 600,  "cost": 500},
+        "The Code":       {"price": 1800, "cost": 1500},
+        "Chromium":       {"price": 4800, "cost": 4000},
+        "Stainless":      {"price": 1440, "cost": 1200},
+        "Sticker":        {"price": 1200, "cost": 1000},
+    }
+
+    # 5) ข้อมูลอ้างอิง — อัตราแรงงานรายวัน และจำนวนชั่วโมงแนะนำตามระดับความซับซ้อน (Level)
+    #    ยังไม่ผูกเข้ากับราคารวมอัตโนมัติ ใช้เป็นตัวช่วยประกอบการตัดสินใจตั้งชั่วโมง/เรทงาน Work ด้านบน
+    LABOR_RATES = {"Engineer": 1000, "Worker": 500, "Designer": 2000}
+    HARD_COAT_HOURS = {1: 2, 2: 3, 3: 4, 4: 6, 5: 8, 6: 12, 7: 15, 8: 20}
+    SANDING_HOURS   = {1: 3, 2: 4, 3: 5, 4: 4, 5: 6, 6: 8, 7: 12, 8: 15}
+    PAINTING_HOURS  = {1: 4, 2: 5, 3: 6, 4: 8, 5: 15, 6: 20, 7: 30, 8: 40}
 
     # 🏭 Machine Master Data — billing unit per machine type (from factory Excel IFS formula).
     # Everything is Baht/Hr. except 3D Print SLA, which bills per finished unit (Baht/Unit).
@@ -1218,73 +1242,154 @@ elif page == t["page_2_name"]:
                 st.rerun()
 
     # ==========================================
-    # 🎨 งานเคลือบผิว & งานทำสี (Finishing & Painting)
+    # 🎨 Hard Coat: งานเคลือบผิว / โมล / Work / งานสี
+    # (จัดกลุ่มตามตาราง "Hard Coat" ในใบประเมินราคาจริง)
     # ==========================================
     st.markdown("---")
     st.markdown(f"##### {t['finishing_title']}")
 
+    HARDCOAT_CATEGORIES = {
+        "TH": ["🧪 กระบวนการเคลือบผิว (Coating)", "🗿 งานทำโมล (Mold)", "🛠️ งาน Work (แรงงานขึ้นรูป)", "🎨 งานสี (Color / Surface Finish)"],
+        "EN": ["🧪 Coating Process", "🗿 Mold", "🛠️ Work (Labor)", "🎨 Color / Surface Finish"],
+    }[lang]
+
     with st.expander(t["finish_expander"], expanded=True):
-        f_col1, f_col2, f_col3, f_col4 = st.columns([2, 1.2, 1.2, 1])
+        hc_cat = st.radio("—", HARDCOAT_CATEGORIES, horizontal=True, key="hc_cat", label_visibility="collapsed")
 
-        with f_col1:
-            selected_finish = st.selectbox(t["finish_select"], list(FINISH_TYPES.keys()))
+        # ---- 1) Coating Process ----
+        if hc_cat == HARDCOAT_CATEGORIES[0]:
+            c1, c2, c3, c4 = st.columns([2, 1.3, 1.3, 1])
+            with c1:
+                hc_item = st.selectbox(t["finish_select"], list(COAT_PROCESS_RATES.keys()), key="hc_item_coat")
+            with c2:
+                hc_rate = st.number_input(
+                    t["finish_rate"], min_value=0.0,
+                    value=float(COAT_PROCESS_RATES[hc_item]), step=10.0, key="hc_rate_coat"
+                )
+            with c3:
+                hc_area = st.number_input(
+                    t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key="hc_area_coat"
+                )
+            with c4:
+                st.write(" "); st.write(" ")
+                if st.button(t["finish_add_btn"], use_container_width=True, key="add_hc_coat"):
+                    st.session_state["selected_finishes"].append({
+                        "type": f"Coating - {hc_item}", "rate": hc_rate, "cost_rate": None,
+                        "area": hc_area, "total": hc_rate * hc_area, "total_cost": None,
+                    })
+                    st.toast(f"Added {hc_item}")
 
-        default_finish_rate = FINISH_TYPES[selected_finish]
+        # ---- 2) Mold ----
+        elif hc_cat == HARDCOAT_CATEGORIES[1]:
+            c1, c2 = st.columns(2)
+            with c1:
+                hc_item = st.selectbox(t["mold_select"], list(MOLD_RATES.keys()), key="hc_item_mold")
+            hc_rate = MOLD_RATES[hc_item]
+            with c2:
+                hc_qty = st.number_input(t["mold_qty"], min_value=0, value=0, step=1, key="hc_qty_mold")
+            hc_total = hc_rate * hc_qty * per_piece_area
+            st.caption(t["mold_rate_label"].format(hc_rate, hc_qty, per_piece_area, hc_total))
+            if st.button(t["finish_add_btn"], key="add_hc_mold"):
+                st.session_state["selected_finishes"].append({
+                    "type": f"Mold - {hc_item}", "rate": hc_rate, "cost_rate": None,
+                    "area": round(hc_qty * per_piece_area, 4), "total": hc_total, "total_cost": None,
+                })
+                st.toast(f"Added {hc_item}")
 
-        with f_col2:
-            finish_rate = st.number_input(
-                t["finish_rate"], min_value=0.0, value=float(default_finish_rate), step=10.0
-            )
+        # ---- 3) Work (labor) ----
+        elif hc_cat == HARDCOAT_CATEGORIES[2]:
+            c1, c2, c3, c4 = st.columns([2, 1.3, 1.3, 1])
+            with c1:
+                hc_item = st.selectbox("Work", list(WORK_RATES.keys()), key="hc_item_work", label_visibility="collapsed")
+            hc_info = WORK_RATES[hc_item]
+            with c2:
+                hc_rate = st.number_input(
+                    f"{t['finish_rate'] if hc_info['billing']=='sq.m.' else ('อัตรา (฿/งาน)' if lang=='TH' else 'Rate (฿/job)')}",
+                    min_value=0.0, value=float(hc_info["rate"]), step=10.0, key="hc_rate_work"
+                )
+            with c3:
+                if hc_info["billing"] == "sq.m.":
+                    hc_qty = st.number_input(t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key="hc_qty_work")
+                else:
+                    hc_qty = st.number_input(
+                        "จำนวนงาน (ชุด)" if lang == "TH" else "Number of jobs",
+                        min_value=0.0, value=1.0, step=1.0, key="hc_qty_work"
+                    )
+            with c4:
+                st.write(" "); st.write(" ")
+                if st.button(t["finish_add_btn"], use_container_width=True, key="add_hc_work"):
+                    st.session_state["selected_finishes"].append({
+                        "type": f"Work - {hc_item}", "rate": hc_rate, "cost_rate": None,
+                        "area": hc_qty, "total": hc_rate * hc_qty, "total_cost": None,
+                    })
+                    st.toast(f"Added {hc_item}")
 
-        with f_col3:
-            finish_area = st.number_input(
-                t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1
-            )
+            with st.popover("💡 " + ("ตัวช่วยประเมินชั่วโมงแรงงาน" if lang == "TH" else "Labor hour helper")):
+                st.caption(
+                    ("ชั่วโมงแนะนำตาม Level ปัจจุบัน (" if lang == "TH" else "Suggested hours for current Level (")
+                    + f"{complexity_level}):"
+                )
+                st.write(
+                    f"- Hard Coat: `{HARD_COAT_HOURS.get(complexity_level, '-')}` Hr. | "
+                    f"Sanding: `{SANDING_HOURS.get(complexity_level, '-')}` Hr. | "
+                    f"Painting: `{PAINTING_HOURS.get(complexity_level, '-')}` Hr."
+                )
+                st.write(
+                    ("อัตราแรงงาน/วัน: " if lang == "TH" else "Daily labor rate: ")
+                    + " | ".join([f"{k} ฿{v:,.0f}" for k, v in LABOR_RATES.items()])
+                )
 
-        with f_col4:
-            st.write(" ")
-            st.write(" ")
-            if st.button(t["finish_add_btn"], use_container_width=True, key="add_finish_btn"):
-                new_finish = {
-                    "type": selected_finish,
-                    "rate": finish_rate,
-                    "area": finish_area,
-                    "total": finish_rate * finish_area,
-                }
-                st.session_state["selected_finishes"].append(new_finish)
-                st.toast(f"Added {selected_finish}")
+        # ---- 4) Color / Surface Finish ----
+        else:
+            c1, c2, c3, c4 = st.columns([2, 1.6, 1.3, 1])
+            with c1:
+                hc_item = st.selectbox(t["finish_select"], list(COLOR_FINISH_DB.keys()), key="hc_item_color")
+            hc_info = COLOR_FINISH_DB[hc_item]
+            with c2:
+                hc_rate = st.number_input(
+                    f"{t['finish_rate']} (cost ฿{hc_info['cost']:,} +20%)",
+                    min_value=0.0, value=float(hc_info["price"]), step=10.0, key="hc_rate_color"
+                )
+            with c3:
+                hc_area = st.number_input(
+                    t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key="hc_area_color"
+                )
+            with c4:
+                st.write(" "); st.write(" ")
+                if st.button(t["finish_add_btn"], use_container_width=True, key="add_hc_color"):
+                    st.session_state["selected_finishes"].append({
+                        "type": f"Color - {hc_item}", "rate": hc_rate, "cost_rate": hc_info["cost"],
+                        "area": hc_area, "total": hc_rate * hc_area, "total_cost": hc_info["cost"] * hc_area,
+                    })
+                    st.toast(f"Added {hc_item}")
 
     if st.session_state["selected_finishes"]:
         st.markdown(f"###### {t['finish_selected_list']}")
         finish_df = pd.DataFrame(st.session_state["selected_finishes"])
         display_finish_df = finish_df[["type", "rate", "area", "total"]].copy()
+        display_finish_df["total_cost"] = finish_df["total_cost"]
         display_finish_df.columns = [
-            t["finish_col_type"], t["finish_col_rate"], t["finish_col_area"], t["finish_col_total"]
+            t["finish_col_type"], t["finish_col_rate"], t["finish_col_area"], t["finish_col_total"],
+            "Total Cost (internal)" if lang == "EN" else "ต้นทุนภายใน (฿)",
         ]
         st.dataframe(display_finish_df, use_container_width=True)
+
+        finishing_margin = sum(
+            (item["total"] - item["total_cost"])
+            for item in st.session_state["selected_finishes"]
+            if item.get("total_cost") is not None
+        )
+        if finishing_margin:
+            st.caption(
+                ("มาร์จิ้นจากงานสี (เทียบต้นทุนภายใน): " if lang == "TH" else "Margin on color/finish items (vs internal cost): ")
+                + f"฿{finishing_margin:,.2f}"
+            )
 
         col_clear_f, col_stat_f = st.columns([1, 3])
         with col_clear_f:
             if st.button(t["finish_clear_btn"]):
                 st.session_state["selected_finishes"] = []
                 st.rerun()
-
-    # ==========================================
-    # 🗿 งานทำโมล (Mold Making) — billed per mold, not per finished piece
-    # ==========================================
-    st.markdown("---")
-    st.markdown(f"##### {t['mold_title']}")
-    c_mold1, c_mold2 = st.columns(2)
-
-    with c_mold1:
-        selected_mold = st.selectbox(t["mold_select"], list(MOLD_RATES.keys()))
-        mold_rate = MOLD_RATES[selected_mold]
-
-    with c_mold2:
-        mold_qty = st.number_input(t["mold_qty"], min_value=0, value=0, step=1)
-
-    mold_cost = mold_rate * mold_qty * per_piece_area
-    st.caption(t["mold_rate_label"].format(mold_rate, mold_qty, per_piece_area, mold_cost))
 
     # ==========================================
     # 🧮 การคำนวณสรุปราคาและต้นทุนรวม
@@ -1297,13 +1402,12 @@ elif page == t["page_2_name"]:
     material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
     finishing_total = sum(f["total"] for f in st.session_state["selected_finishes"])
 
-    subtotal = machine_total + material_total_price + finishing_total + mold_cost
+    subtotal = machine_total + material_total_price + finishing_total
 
-    col_res1, col_res2, col_res3, col_res4 = st.columns(4)
+    col_res1, col_res2, col_res3 = st.columns(3)
     col_res1.metric(t["mch_cost"], f"฿{machine_total:,.2f}")
     col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
     col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
-    col_res4.metric(t["mold_cost"], f"฿{mold_cost:,.2f}")
 
     st.markdown(f"### {t['grand_total']}")
     st.title(f"฿ {subtotal:,.2f} THB")
