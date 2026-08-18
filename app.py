@@ -180,7 +180,9 @@ TEXTS = {
         "model_info": "📌 **ข้อมูลโมเดลปัจจุบันจากหน้าแรก:** ไฟล์ `{}` | ขนาด `{}` mm | พื้นที่ผิว `{:.3f}` ตร.ม.",
         "project_name": "ชื่อชิ้นงาน / ลูกค้า",
         "complexity_level": "ระดับความซับซ้อน (Level 1-10)",
-        "calc_area": "พื้นที่ทำสี/เคลือบผิว (sq.m.)",
+        "calc_area": "พื้นที่ทำสี/เคลือบผิว รวมทั้งล็อต (sq.m.)",
+        "production_qty": "จำนวนที่ผลิต (Qty)",
+        "per_piece_area_note": "พื้นที่ผิวต่อชิ้นจากไฟล์ 3D: {:.4f} ตร.ม. × {} ชิ้น = {:.4f} ตร.ม.",
         "op_title": "⚙️ เลือกกระบวนการเครื่องจักร (Operations)",
         "mch_rate": "ค่าเครื่อง (฿/Hr)",
         "op_select_machine": "เลือกประเภทเครื่องจักร",
@@ -260,7 +262,9 @@ TEXTS = {
         "model_info": "📌 **Current Model Data from Page 1:** File `{}` | Dimensions `{}` mm | Surface Area `{:.3f}` sq.m.",
         "project_name": "Project Name / Customer",
         "complexity_level": "Complexity Level (Level 1-10)",
-        "calc_area": "Painting / Coating Area (sq.m.)",
+        "calc_area": "Painting / Coating Area, whole batch (sq.m.)",
+        "production_qty": "Production Quantity (Qty)",
+        "per_piece_area_note": "Per-piece surface area from 3D file: {:.4f} sq.m. × {} pcs = {:.4f} sq.m.",
         "op_title": "⚙️ Select Machine Operations",
         "mch_rate": "Machine Rate (฿/Hr)",
         "op_select_machine": "Select Machine Type",
@@ -1042,14 +1046,19 @@ elif page == t["page_2_name"]:
     with col_in1:
         project_name = st.text_input(t["project_name"], value=st.session_state["file_name"])
         complexity_level = st.slider(t["complexity_level"], min_value=1, max_value=10, value=5)
+        production_qty = st.number_input(t["production_qty"], min_value=1, value=1, step=1)
+
+    per_piece_area = float(st.session_state["surface_area_sqm"])
+    suggested_batch_area = round(per_piece_area * production_qty, 4)
 
     with col_in2:
         calc_area = st.number_input(
-            t["calc_area"], 
-            min_value=0.0, 
-            value=float(st.session_state["surface_area_sqm"]), 
+            t["calc_area"],
+            min_value=0.0,
+            value=suggested_batch_area,
             step=0.1
         )
+        st.caption(t["per_piece_area_note"].format(per_piece_area, production_qty, suggested_batch_area))
 
     st.markdown(f"##### {t['op_title']}")
 
