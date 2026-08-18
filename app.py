@@ -207,9 +207,17 @@ TEXTS = {
         "selected_mat_list": "📋 รายการวัสดุที่เลือกในชิ้นงานนี้",
         "clear_mat_btn": "🗑️ ล้างรายการวัสดุทั้งหมด",
         "finishing_title": "🎨 งานเคลือบผิวแข็ง & งานทำสี (Finishing & Painting)",
-        "hardcoat_select": "ประเภท Hardcoat / เคลือบผิว",
-        "color_select": "ประเภทการทำสี / ปิดผิว",
-        "rate_label": "อัตราค่าบริการ: ฿{:,.2f} / ตร.ม. | ราคารวม: ฿{:,.2f}",
+        "finish_select": "เลือกประเภทงานเคลือบผิว/ทำสี",
+        "finish_rate": "อัตรา (฿/ตร.ม.)",
+        "finish_area": "พื้นที่ใช้งานนี้ (ตร.ม.)",
+        "finish_add_btn": "➕ เพิ่มงานเคลือบผิว",
+        "finish_expander": "➕ คลิกเพื่อเลือกและเพิ่มงานเคลือบผิว/ทำสีลงในชิ้นงาน (เพิ่มได้หลายชนิด)",
+        "finish_selected_list": "📋 รายการงานเคลือบผิวที่เลือกในชิ้นงานนี้",
+        "finish_clear_btn": "🗑️ ล้างรายการงานเคลือบผิวทั้งหมด",
+        "finish_col_type": "ประเภท",
+        "finish_col_rate": "อัตรา (฿/ตร.ม.)",
+        "finish_col_area": "พื้นที่ (ตร.ม.)",
+        "finish_col_total": "รวม (฿)",
         "mold_title": "🗿 งานทำโมล (Mold Making)",
         "mold_select": "ประเภทโมล",
         "mold_qty": "จำนวนโมล (ชุด)",
@@ -294,9 +302,17 @@ TEXTS = {
         "selected_mat_list": "📋 Selected Material List",
         "clear_mat_btn": "🗑️ Clear All Materials",
         "finishing_title": "🎨 Surface Finishing & Painting",
-        "hardcoat_select": "Hardcoat / Coating Type",
-        "color_select": "Painting / Surface Finish Type",
-        "rate_label": "Service Rate: ฿{:,.2f} / sq.m. | Total Price: ฿{:,.2f}",
+        "finish_select": "Select Finish / Coating Type",
+        "finish_rate": "Rate (฿/sq.m.)",
+        "finish_area": "Area for this line (sq.m.)",
+        "finish_add_btn": "➕ Add Finish",
+        "finish_expander": "➕ Click to select and add finish/coating types to the project (add as many as needed)",
+        "finish_selected_list": "📋 Selected Finishing Items",
+        "finish_clear_btn": "🗑️ Clear All Finishing Items",
+        "finish_col_type": "Type",
+        "finish_col_rate": "Rate (฿/sq.m.)",
+        "finish_col_area": "Area (sq.m.)",
+        "finish_col_total": "Total (฿)",
         "mold_title": "🗿 Mold Making",
         "mold_select": "Mold Type",
         "mold_qty": "Number of Molds",
@@ -331,6 +347,8 @@ if "selected_materials" not in st.session_state:
     st.session_state["selected_materials"] = []
 if "selected_operations" not in st.session_state:
     st.session_state["selected_operations"] = []
+if "selected_finishes" not in st.session_state:
+    st.session_state["selected_finishes"] = []
 
 # ==========================================
 # 🧭 4. Sidebar Navigation & Language Selector
@@ -1022,8 +1040,22 @@ elif page == t["page_2_name"]:
 }
 
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
-    HARDCOAT_RATES = {"None / ไม่มี": 0, "Polyurea": 1350, "Mold Fiber": 1520, "Fiberglass": 1090, "Epoxy": 600}
-    COLOR_RATES = {"None / ไม่มี": 0, "Normal": 1440, "Chromium": 4800, "The Code": 1800, "Gold leaves": 168, "Sticker": 1200}
+    # Surface finishing rates (฿/sq.m.) — matches the 4 "Type" categories on the
+    # factory estimate sheet's Hard Coat table: Poly&Epoxy, Fiberglass, Color Type, Sticker.
+    # Poly & Epoxy rate defaults to 0 (the reference estimate sheet shows 0 for this
+    # job too) — edit the rate in the UI before adding if your job actually uses it.
+    FINISH_TYPES = {
+        "Poly & Epoxy": 0,
+        "Fiberglass": 1090,
+        "Polyurea": 1350,
+        "Mold Fiber": 1520,
+        "Epoxy": 600,
+        "Color - Normal": 1440,
+        "Color - Chromium": 4800,
+        "Color - The Code": 1800,
+        "Color - Gold leaves": 168,
+        "Sticker": 1200,
+    }
     # Mold tooling rates (฿/sq.m of mold surface) — from factory "Mold" cost table.
     # Billed per MOLD (qty of molds made), not per finished piece — a mold's surface
     # area is ~1 piece's surface area, so cost = rate × mold_qty × per_piece_area.
@@ -1186,23 +1218,56 @@ elif page == t["page_2_name"]:
                 st.rerun()
 
     # ==========================================
-    # 🎨 งานเคลือบผิว & งานทำสี (Hardcoat & Painting)
+    # 🎨 งานเคลือบผิว & งานทำสี (Finishing & Painting)
     # ==========================================
     st.markdown("---")
     st.markdown(f"##### {t['finishing_title']}")
-    c_hc1, c_hc2 = st.columns(2)
 
-    with c_hc1:
-        selected_hardcoat = st.selectbox(t["hardcoat_select"], list(HARDCOAT_RATES.keys()))
-        hardcoat_rate = HARDCOAT_RATES[selected_hardcoat]
-        hardcoat_cost = hardcoat_rate * calc_area
-        st.caption(t["rate_label"].format(hardcoat_rate, hardcoat_cost))
+    with st.expander(t["finish_expander"], expanded=True):
+        f_col1, f_col2, f_col3, f_col4 = st.columns([2, 1.2, 1.2, 1])
 
-    with c_hc2:
-        selected_color = st.selectbox(t["color_select"], list(COLOR_RATES.keys()))
-        color_rate = COLOR_RATES[selected_color]
-        color_cost = color_rate * calc_area
-        st.caption(t["rate_label"].format(color_rate, color_cost))
+        with f_col1:
+            selected_finish = st.selectbox(t["finish_select"], list(FINISH_TYPES.keys()))
+
+        default_finish_rate = FINISH_TYPES[selected_finish]
+
+        with f_col2:
+            finish_rate = st.number_input(
+                t["finish_rate"], min_value=0.0, value=float(default_finish_rate), step=10.0
+            )
+
+        with f_col3:
+            finish_area = st.number_input(
+                t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1
+            )
+
+        with f_col4:
+            st.write(" ")
+            st.write(" ")
+            if st.button(t["finish_add_btn"], use_container_width=True, key="add_finish_btn"):
+                new_finish = {
+                    "type": selected_finish,
+                    "rate": finish_rate,
+                    "area": finish_area,
+                    "total": finish_rate * finish_area,
+                }
+                st.session_state["selected_finishes"].append(new_finish)
+                st.toast(f"Added {selected_finish}")
+
+    if st.session_state["selected_finishes"]:
+        st.markdown(f"###### {t['finish_selected_list']}")
+        finish_df = pd.DataFrame(st.session_state["selected_finishes"])
+        display_finish_df = finish_df[["type", "rate", "area", "total"]].copy()
+        display_finish_df.columns = [
+            t["finish_col_type"], t["finish_col_rate"], t["finish_col_area"], t["finish_col_total"]
+        ]
+        st.dataframe(display_finish_df, use_container_width=True)
+
+        col_clear_f, col_stat_f = st.columns([1, 3])
+        with col_clear_f:
+            if st.button(t["finish_clear_btn"]):
+                st.session_state["selected_finishes"] = []
+                st.rerun()
 
     # ==========================================
     # 🗿 งานทำโมล (Mold Making) — billed per mold, not per finished piece
@@ -1230,7 +1295,7 @@ elif page == t["page_2_name"]:
     machine_total = sum(op["total"] for op in st.session_state["selected_operations"])
 
     material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
-    finishing_total = hardcoat_cost + color_cost
+    finishing_total = sum(f["total"] for f in st.session_state["selected_finishes"])
 
     subtotal = machine_total + material_total_price + finishing_total + mold_cost
 
