@@ -136,8 +136,8 @@ st.markdown("""
 TEXTS = {
     "TH": {
         "sidebar_menu": "📌 เมนูหลัก",
-        "page_1_name": "แบบจำลอง 3 มิติและพื้นผิว",
-        "page_2_name": "ประเมินราคา",
+        "page_1_name": "📦 แบบจำลอง 3 มิติและพื้นผิว",
+        "page_2_name": "💰 ประเมินราคา",
         "lang_select": "🌐 เลือกภาษา / Language",
         # Page 1
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
@@ -153,6 +153,14 @@ TEXTS = {
         "unit_dm": "เดซิเมตร / 10 ซม. (dm)",
         "unit_cm": "เซนติเมตร (cm)",
         "unit_mm": "มิลลิเมตร (mm)",
+        "size_panel_title": "📏 ปรับขนาดโมเดล",
+        "size_panel_sub": "ค่าเริ่มต้นดึงจากไฟล์ 3D — แก้ไขได้",
+        "lock_ratio": "ล็อกสัดส่วน 1:1",
+        "size_w": "กว้าง (mm)",
+        "size_l": "ยาว (mm)",
+        "size_h": "สูง (mm)",
+        "size_reset_btn": "↺ รีเซ็ตเป็นขนาดไฟล์ต้นฉบับ",
+        "size_recalc_note": "💡 พื้นที่ผิว/ปริมาตรคำนวณใหม่อัตโนมัติตามขนาดที่ปรับ",
         "file_uploader": "เลือกไฟล์โมเดล 3D",
         "success_msg": "✅ ประมวลผลไฟล์สำเร็จ! ส่งข้อมูลไปยังหน้า 2 เรียบร้อย",
         "viewer_title": "🖥️ ตัวอย่างโมเดล 3D Interactive",
@@ -231,8 +239,8 @@ TEXTS = {
     },
     "EN": {
         "sidebar_menu": "📌 Main Menu",
-        "page_1_name": "3D Model & Surface",
-        "page_2_name": "Cost Estimator",
+        "page_1_name": "📦 3D Model & Surface",
+        "page_2_name": "💰 Cost Estimator",
         "lang_select": "🌐 Select Language / เลือกภาษา",
         # Page 1
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
@@ -248,6 +256,14 @@ TEXTS = {
         "unit_dm": "Decimeters / 10 cm (dm)",
         "unit_cm": "Centimeters (cm)",
         "unit_mm": "Millimeters (mm)",
+        "size_panel_title": "📏 Adjust model size",
+        "size_panel_sub": "Defaults from the 3D file — editable",
+        "lock_ratio": "Lock ratio 1:1",
+        "size_w": "Width (mm)",
+        "size_l": "Length (mm)",
+        "size_h": "Height (mm)",
+        "size_reset_btn": "↺ Reset to original file size",
+        "size_recalc_note": "💡 Surface area/volume recalculate automatically with the adjusted size",
         "file_uploader": "Select a 3D model file",
         "success_msg": "✅ File processed successfully! Data passed to Page 2.",
         "viewer_title": "🖥️ 3D Model Interactive Viewer",
@@ -681,14 +697,78 @@ if page == t["page_1_name"]:
 
                 is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
-                extents_raw = mesh.extents
-                width_x_m = extents_raw[0] * scale_to_m
-                length_y_m = extents_raw[1] * scale_to_m
-                height_z_m = extents_raw[2] * scale_to_m
+                # --- Convert the raw mesh to real millimetres once, using the
+                # file-unit interpretation above. This becomes the "base" shape
+                # that the size-editor panel scales from. ---
+                mesh_mm = mesh.copy()
+                mesh_mm.apply_scale(scale_to_m * 1000.0)
+                base_extents = mesh_mm.extents
+                base_w_mm, base_l_mm, base_h_mm = float(base_extents[0]), float(base_extents[1]), float(base_extents[2])
 
-                width_x_cm = width_x_m * 100.0
-                length_y_cm = length_y_m * 100.0
-                height_z_cm = height_z_m * 100.0
+                file_identity = f"{uploaded_file.name}_{uploaded_file.size}"
+                if st.session_state.get("size_panel_file_id") != file_identity:
+                    st.session_state["size_panel_file_id"] = file_identity
+                    st.session_state["dim_w_mm"] = round(base_w_mm, 3)
+                    st.session_state["dim_l_mm"] = round(base_l_mm, 3)
+                    st.session_state["dim_h_mm"] = round(base_h_mm, 3)
+                if "lock_ratio_toggle" not in st.session_state:
+                    st.session_state["lock_ratio_toggle"] = True
+
+                def _sync_from_width():
+                    if st.session_state.get("lock_ratio_toggle", True) and base_w_mm > 0:
+                        k = st.session_state["dim_w_mm"] / base_w_mm
+                        st.session_state["dim_l_mm"] = round(base_l_mm * k, 3)
+                        st.session_state["dim_h_mm"] = round(base_h_mm * k, 3)
+
+                def _sync_from_length():
+                    if st.session_state.get("lock_ratio_toggle", True) and base_l_mm > 0:
+                        k = st.session_state["dim_l_mm"] / base_l_mm
+                        st.session_state["dim_w_mm"] = round(base_w_mm * k, 3)
+                        st.session_state["dim_h_mm"] = round(base_h_mm * k, 3)
+
+                def _sync_from_height():
+                    if st.session_state.get("lock_ratio_toggle", True) and base_h_mm > 0:
+                        k = st.session_state["dim_h_mm"] / base_h_mm
+                        st.session_state["dim_w_mm"] = round(base_w_mm * k, 3)
+                        st.session_state["dim_l_mm"] = round(base_l_mm * k, 3)
+
+                st.sidebar.markdown("---")
+                st.sidebar.subheader(t["size_panel_title"])
+                st.sidebar.caption(t["size_panel_sub"])
+                st.sidebar.toggle(t["lock_ratio"], key="lock_ratio_toggle")
+                st.sidebar.number_input(t["size_w"], min_value=0.001, key="dim_w_mm", step=1.0, on_change=_sync_from_width)
+                st.sidebar.number_input(t["size_l"], min_value=0.001, key="dim_l_mm", step=1.0, on_change=_sync_from_length)
+                st.sidebar.number_input(t["size_h"], min_value=0.001, key="dim_h_mm", step=1.0, on_change=_sync_from_height)
+                if st.sidebar.button(t["size_reset_btn"], use_container_width=True):
+                    st.session_state["dim_w_mm"] = round(base_w_mm, 3)
+                    st.session_state["dim_l_mm"] = round(base_l_mm, 3)
+                    st.session_state["dim_h_mm"] = round(base_h_mm, 3)
+                    st.rerun()
+                st.sidebar.caption(t["size_recalc_note"])
+
+                # --- Apply the (possibly non-uniform) scale the user dialed in,
+                # then recompute area/volume from the ACTUAL transformed mesh —
+                # exact either way, uniform or not. ---
+                kx = st.session_state["dim_w_mm"] / base_w_mm if base_w_mm > 0 else 1.0
+                ky = st.session_state["dim_l_mm"] / base_l_mm if base_l_mm > 0 else 1.0
+                kz = st.session_state["dim_h_mm"] / base_h_mm if base_h_mm > 0 else 1.0
+
+                final_mesh = mesh_mm.copy()
+                scale_matrix = np.eye(4)
+                scale_matrix[0, 0] = kx
+                scale_matrix[1, 1] = ky
+                scale_matrix[2, 2] = kz
+                final_mesh.apply_transform(scale_matrix)
+
+                width_x_mm = st.session_state["dim_w_mm"]
+                length_y_mm = st.session_state["dim_l_mm"]
+                height_z_mm = st.session_state["dim_h_mm"]
+                width_x_m = width_x_mm / 1000.0
+                length_y_m = length_y_mm / 1000.0
+                height_z_m = height_z_mm / 1000.0
+                width_x_cm = width_x_mm / 10.0
+                length_y_cm = length_y_mm / 10.0
+                height_z_cm = height_z_mm / 10.0
 
                 surface_area_m2 = 0.0
                 volume_m3 = 0.0
@@ -696,20 +776,20 @@ if page == t["page_1_name"]:
                 used_convex_hull = False
 
                 if is_point_cloud:
-                    hull = mesh.convex_hull
-                    surface_area_m2 = hull.area * (scale_to_m ** 2)
-                    volume_m3 = hull.volume * (scale_to_m ** 3)
+                    hull = final_mesh.convex_hull
+                    surface_area_m2 = hull.area / 1_000_000.0
+                    volume_m3 = hull.volume / 1_000_000_000.0
                     used_convex_hull = True
                 else:
-                    surface_area_m2 = mesh.area * (scale_to_m ** 2)
-                    is_watertight = getattr(mesh, 'is_watertight', False)
+                    surface_area_m2 = final_mesh.area / 1_000_000.0
+                    is_watertight = getattr(final_mesh, 'is_watertight', False)
 
                     if is_watertight:
-                        volume_m3 = mesh.volume * (scale_to_m ** 3)
+                        volume_m3 = final_mesh.volume / 1_000_000_000.0
                     else:
                         try:
-                            hull = mesh.convex_hull
-                            volume_m3 = hull.volume * (scale_to_m ** 3)
+                            hull = final_mesh.convex_hull
+                            volume_m3 = hull.volume / 1_000_000_000.0
                             used_convex_hull = True
                         except Exception:
                             volume_m3 = 0.0
@@ -717,13 +797,14 @@ if page == t["page_1_name"]:
                 surface_area_cm2 = surface_area_m2 * 10_000.0
                 volume_cm3 = volume_m3 * 1_000_000.0
 
-                complexity = analyze_surface_complexity(mesh, scale_to_m, is_point_cloud)
+                # final_mesh is already in real millimetres, so scale_to_m=0.001 here
+                complexity = analyze_surface_complexity(final_mesh, 0.001, is_point_cloud)
 
                 st.session_state["surface_area_sqm"] = surface_area_m2
-                st.session_state["dimensions_str"] = f"{width_x_m*1000:.0f}*{length_y_m*1000:.0f}*{height_z_m*1000:.0f}"
-                st.session_state["width_x_mm"] = width_x_m * 1000
-                st.session_state["length_y_mm"] = length_y_m * 1000
-                st.session_state["height_z_mm"] = height_z_m * 1000
+                st.session_state["dimensions_str"] = f"{width_x_mm:.0f}*{length_y_mm:.0f}*{height_z_mm:.0f}"
+                st.session_state["width_x_mm"] = width_x_mm
+                st.session_state["length_y_mm"] = length_y_mm
+                st.session_state["height_z_mm"] = height_z_mm
                 st.session_state["file_name"] = uploaded_file.name
 
             file_size_kb = uploaded_file.size / 1024
@@ -755,7 +836,7 @@ if page == t["page_1_name"]:
             with col_viewer:
                 st.subheader(t["viewer_title"])
                 st.caption(t["viewer_help"])
-                html_viewer = render_3d_viewer(mesh)
+                html_viewer = render_3d_viewer(final_mesh)
                 if html_viewer:
                     components.html(html_viewer, height=510)
                 else:
@@ -764,13 +845,13 @@ if page == t["page_1_name"]:
             with col_metrics:
                 st.subheader(t["dim_title"])
                 dim_col1, dim_col2, dim_col3 = st.columns(3)
-                dim_col1.metric(t["dim_w"], f"{width_x_m:,.3f} m", f"{width_x_cm:,.1f} cm")
-                dim_col2.metric(t["dim_l"], f"{length_y_m:,.3f} m", f"{length_y_cm:,.1f} cm")
-                dim_col3.metric(t["dim_h"], f"{height_z_m:,.3f} m", f"{height_z_cm:,.1f} cm")
+                dim_col1.metric(t["dim_w"], f"{width_x_mm:,.1f} mm", f"↑ {width_x_m:,.3f} m")
+                dim_col2.metric(t["dim_l"], f"{length_y_mm:,.1f} mm", f"↑ {length_y_m:,.3f} m")
+                dim_col3.metric(t["dim_h"], f"{height_z_mm:,.1f} mm", f"↑ {height_z_m:,.3f} m")
 
-                min_dimension_m = min(width_x_m, length_y_m, height_z_m)
-                if min_dimension_m < 0.10:
-                    st.warning(t["small_dim_warn"].format(min_dimension_m*100))
+                min_dimension_mm = min(width_x_mm, length_y_mm, height_z_mm)
+                if min_dimension_mm < 100.0:
+                    st.warning(t["small_dim_warn"].format(min_dimension_mm / 10.0))
 
                 st.markdown("---")
 
