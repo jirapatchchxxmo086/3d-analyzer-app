@@ -146,13 +146,6 @@ TEXTS = {
         "welcome_sub": "มาเริ่มสร้างสรรค์งานชิ้นต่อไปกันเถอะ",
         "file_processed_badge": "ประมวลผลไฟล์สำเร็จ",
         "file_processed_sub": "ข้อมูลพร้อมสำหรับประเมินราคา",
-        "unit_setting": "⚙️ ตั้งค่าหน่วย",
-        "unit_select": "เลือกหน่วยของไฟล์โมเดล 3D",
-        "unit_help": "ไฟล์ 3D (OBJ, STL, PLY) เก็บเพียงตัวเลขไม่มีหน่วย กำหนดหน่วยให้ตรงกับตอนสร้างโมเดล",
-        "unit_m": "เมตร (m)",
-        "unit_dm": "เดซิเมตร / 10 ซม. (dm)",
-        "unit_cm": "เซนติเมตร (cm)",
-        "unit_mm": "มิลลิเมตร (mm)",
         "size_panel_title": "📏 ปรับขนาดโมเดล",
         "size_panel_sub": "ค่าเริ่มต้นดึงจากไฟล์ 3D — แก้ไขได้",
         "lock_ratio": "ล็อกสัดส่วน 1:1",
@@ -249,13 +242,6 @@ TEXTS = {
         "welcome_sub": "Let's bring your ideas to life.",
         "file_processed_badge": "File processed successfully",
         "file_processed_sub": "Data ready for cost estimation",
-        "unit_setting": "⚙️ Unit Settings",
-        "unit_select": "Select Model File Unit",
-        "unit_help": "3D formats (OBJ, STL, PLY) store raw numbers without units. Select the unit used when creating the model.",
-        "unit_m": "Meters (m)",
-        "unit_dm": "Decimeters / 10 cm (dm)",
-        "unit_cm": "Centimeters (cm)",
-        "unit_mm": "Millimeters (mm)",
         "size_panel_title": "📏 Adjust model size",
         "size_panel_sub": "Defaults from the 3D file — editable",
         "lock_ratio": "Lock ratio 1:1",
@@ -411,22 +397,10 @@ if page == t["page_1_name"]:
     </div>
     """, unsafe_allow_html=True)
 
-    st.sidebar.header(t["unit_setting"])
-    unit_input = st.sidebar.selectbox(
-        t["unit_select"],
-        options=[t["unit_m"], t["unit_dm"], t["unit_cm"], t["unit_mm"]],
-        index=0,
-        help=t["unit_help"]
-    )
-
-    if unit_input == t["unit_m"]:
-        scale_to_m = 1.0
-    elif unit_input == t["unit_dm"]:
-        scale_to_m = 0.1
-    elif unit_input == t["unit_cm"]:
-        scale_to_m = 0.01
-    else:
-        scale_to_m = 0.001
+    # ไฟล์ 3D ทุกไฟล์ถือว่าเป็นหน่วยมิลลิเมตร (mm) เสมอ — ถ้าไฟล์จริงเป็นหน่วยอื่น
+    # ผู้ใช้แก้ไขขนาดจริงได้ตรงๆ ในแผงปรับขนาดโมเดล (ด้านล่าง) ซึ่งคำนวณ
+    # พื้นที่ผิว/ปริมาตรใหม่แม่นยำ 100% ตามขนาดที่แก้ไข ไม่ต้องพึ่งการเดาหน่วยไฟล์อีกต่อไป
+    scale_to_m = 0.001
 
     def process_and_clean_mesh(loaded_data):
         if isinstance(loaded_data, trimesh.Scene):
