@@ -7,6 +7,8 @@ import base64
 import pandas as pd
 from string import Template
 import streamlit.components.v1 as components
+import auth
+auth.require_login()
 
 # ==========================================
 # ⚙️ 1. Page Configuration
