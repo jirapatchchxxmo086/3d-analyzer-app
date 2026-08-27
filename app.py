@@ -886,8 +886,7 @@ elif page == t["page_2_name"]:
     COAT_PROCESS_SHEET_NAME,
 )
     # 🗂️ Material Master Data Database
-MATERIAL_MASTER_DB = load_material_master_db()
-
+    MATERIAL_MASTER_DB = load_material_master_db()
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
 
     # ==========================================
@@ -897,10 +896,9 @@ MATERIAL_MASTER_DB = load_material_master_db()
 
     # 1) กระบวนการเคลือบผิว (Coating Process) — คิดตามพื้นที่ทำสี/เคลือบผิวทั้งล็อต
  COAT_PROCESS_RATES = load_rate_dict(COAT_PROCESS_SHEET_NAME, "process_name", "rate")
-MOLD_RATES = load_mold_rates()
-WORK_RATES = load_work_rates()
-COLOR_FINISH_DB = load_color_finish_db()
-
+ MOLD_RATES = load_mold_rates()
+ WORK_RATES = load_work_rates()
+ COLOR_FINISH_DB = load_color_finish_db()
     # 5) ข้อมูลอ้างอิง — อัตราแรงงานรายวัน และจำนวนชั่วโมงแนะนำตามระดับความซับซ้อน (Level)
     #    ยังไม่ผูกเข้ากับราคารวมอัตโนมัติ ใช้เป็นตัวช่วยประกอบการตัดสินใจตั้งชั่วโมง/เรทงาน Work ด้านบน
     LABOR_RATES = {"Engineer": 1000, "Worker": 500, "Designer": 2000}
