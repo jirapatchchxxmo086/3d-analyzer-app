@@ -337,6 +337,8 @@ if "language" not in st.session_state:
     st.session_state["language"] = "TH"
 if "surface_area_sqm" not in st.session_state:
     st.session_state["surface_area_sqm"] = 0.0
+if "volume_cm3" not in st.session_state:
+    st.session_state["volume_cm3"] = 0.0
 if "dimensions_str" not in st.session_state:
     st.session_state["dimensions_str"] = "0 * 0 * 0"
 if "width_x_mm" not in st.session_state:
@@ -777,6 +779,7 @@ if page == t["page_1_name"]:
                 complexity = analyze_surface_complexity(final_mesh, 0.001, is_point_cloud)
 
                 st.session_state["surface_area_sqm"] = surface_area_m2
+                st.session_state["volume_cm3"] = volume_cm3
                 st.session_state["dimensions_str"] = f"{width_x_mm:.0f}*{length_y_mm:.0f}*{height_z_mm:.0f}"
                 st.session_state["width_x_mm"] = width_x_mm
                 st.session_state["length_y_mm"] = length_y_mm
@@ -887,6 +890,7 @@ elif page == t["page_2_name"]:
     load_color_finish_db,
     COAT_PROCESS_SHEET_NAME,
 )
+    from machining_estimator import estimate_foam_cnc_hours, estimate_3d_print_hours
     # 🗂️ Material Master Data Database
     MATERIAL_MASTER_DB = load_material_master_db()
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
@@ -944,6 +948,14 @@ elif page == t["page_2_name"]:
     per_piece_area = float(st.session_state["surface_area_sqm"])
     suggested_batch_area = round(per_piece_area * production_qty, 4)
 
+    # ข้อมูลสำหรับประเมิน Machining Hours อัตโนมัติ (Foam CNC / 3D Print)
+    per_piece_volume_cm3 = float(st.session_state.get("volume_cm3", 0.0))
+    bbox_w_mm = float(st.session_state.get("width_x_mm", 0.0))
+    bbox_l_mm = float(st.session_state.get("length_y_mm", 0.0))
+    bbox_h_mm = float(st.session_state.get("height_z_mm", 0.0))
+    bbox_volume_cm3 = (bbox_w_mm * bbox_l_mm * bbox_h_mm) / 1000.0
+    per_piece_removal_cm3 = max(bbox_volume_cm3 - per_piece_volume_cm3, 0.0)
+
     with col_in2:
         calc_area = st.number_input(
             t["calc_area"],
@@ -975,10 +987,29 @@ elif page == t["page_2_name"]:
 
         with o_col3:
             if op_unit == "Baht/Hr.":
-                # Handy default for Robot: suggest hours from area × complexity level factor,
-                # same estimate the original single-machine version used.
+                # ประเมินชั่วโมงอัตโนมัติจากเรขาคณิตจริงของโมเดล (Foam CNC / 3D Print)
+                # เครื่องอื่นที่ยังไม่มีสูตร ใช้ค่าเริ่มต้น 1 ชม. ให้กรอกเองเหมือนเดิม
                 if selected_machine == "Robot":
-                    suggested_qty = round(calc_area * LEVEL_FACTORS.get(complexity_level, 5.0), 2)
+                    machining_result = estimate_foam_cnc_hours(
+                        volume_removal_cm3=per_piece_removal_cm3 * production_qty,
+                        surface_area_sqm=calc_area,
+                        complexity_level=complexity_level,
+                    )
+                    suggested_qty = machining_result.hours
+                    st.caption(
+                        f"⚙️ ประมาณอัตโนมัติ: Roughing {machining_result.breakdown['roughing_hours']} ชม. "
+                        f"+ Finishing {machining_result.breakdown['finishing_hours']} ชม. "
+                        f"(ดอก finishing {machining_result.breakdown['finish_tool_mm_used']} มม.)"
+                    )
+                elif selected_machine == "3D Print FDM":
+                    print_result = estimate_3d_print_hours(
+                        volume_cm3=per_piece_volume_cm3 * production_qty,
+                    )
+                    suggested_qty = print_result.hours
+                    st.caption(
+                        f"⚙️ ประมาณอัตโนมัติ: ปริมาตรพิมพ์จริง {print_result.breakdown['effective_volume_cm3']} cm³ "
+                        f"({print_result.breakdown['extrusion_length_m']} ม. เส้นพลาสติก)"
+                    )
                 else:
                     suggested_qty = 1.0
                 op_qty = st.number_input(
