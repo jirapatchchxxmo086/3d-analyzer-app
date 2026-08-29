@@ -1002,12 +1002,20 @@ elif page == t["page_2_name"]:
                         f"(ดอก finishing {machining_result.breakdown['finish_tool_mm_used']} มม.)"
                     )
                 elif selected_machine == "3D Print FDM":
+                    print_qty_actual = st.number_input(
+                        "จำนวนที่ต้องพิมพ์จริง (เช่น ต้นแบบสำหรับทำโมล อาจน้อยกว่าจำนวนผลิตทั้งหมด)"
+                        if lang == "TH" else
+                        "Actual pieces to print (e.g. molding masters — may be fewer than total Qty)",
+                        min_value=1, value=int(production_qty), step=1,
+                        key="fdm_print_qty_actual",
+                    )
                     print_result = estimate_3d_print_hours(
-                        volume_cm3=per_piece_volume_cm3 * production_qty,
+                        volume_cm3=per_piece_volume_cm3 * print_qty_actual,
                     )
                     suggested_qty = print_result.hours
                     st.caption(
-                        f"⚙️ ประมาณอัตโนมัติ: ปริมาตรพิมพ์จริง {print_result.breakdown['effective_volume_cm3']} cm³ "
+                        f"⚙️ ประมาณอัตโนมัติ (พิมพ์ {print_qty_actual} ชิ้น): "
+                        f"ปริมาตรพิมพ์จริง {print_result.breakdown['effective_volume_cm3']} cm³ "
                         f"({print_result.breakdown['extrusion_length_m']} ม. เส้นพลาสติก)"
                     )
                 else:
