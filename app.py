@@ -1020,9 +1020,12 @@ elif page == t["page_2_name"]:
                     )
                 else:
                     suggested_qty = 1.0
+                # ⚠️ key ต้องเปลี่ยนตามค่าที่คำนวณได้ (suggested_qty) ไม่ใช่แค่ชื่อเครื่อง
+                # ไม่งั้น Streamlit จะค้างค่าตัวเลขเก่าไว้ ไม่ยอมอัปเดตตาม value= ใหม่
+                # เวลาพารามิเตอร์อื่น (เช่น จำนวนที่ต้องพิมพ์จริง, complexity level) เปลี่ยนไป
                 op_qty = st.number_input(
                     t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
-                    key=f"op_qty_{selected_machine}"
+                    key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
                 )
             else:  # Baht/Unit (e.g. 3D Print SLA)
                 op_qty = st.number_input(
