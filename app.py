@@ -987,46 +987,49 @@ elif page == t["page_2_name"]:
 
         with o_col3:
             if op_unit == "Baht/Hr.":
-                # ประเมินชั่วโมงอัตโนมัติจากเรขาคณิตจริงของโมเดล (Foam CNC / 3D Print)
-                # เครื่องอื่นที่ยังไม่มีสูตร ใช้ค่าเริ่มต้น 1 ชม. ให้กรอกเองเหมือนเดิม
+                # ประเมินชั่วโมงต่อ "1 ชิ้นงาน" เสมอ (ไม่คูณจำนวนผลิต) — ทีมงานคูณเองตอนใช้จริง
                 if selected_machine == "Robot":
                     machining_result = estimate_foam_cnc_hours(
-                        volume_removal_cm3=per_piece_removal_cm3 * production_qty,
-                        surface_area_sqm=calc_area,
+                        volume_removal_cm3=per_piece_removal_cm3,
+                        surface_area_sqm=per_piece_area,
                         complexity_level=complexity_level,
                     )
-                    suggested_qty = machining_result.hours
+                    suggested_rough = machining_result.breakdown["roughing_hours"]
+                    suggested_finish = machining_result.breakdown["finishing_hours"]
                     st.caption(
-                        f"⚙️ ประมาณอัตโนมัติ: Roughing {machining_result.breakdown['roughing_hours']} ชม. "
-                        f"+ Finishing {machining_result.breakdown['finishing_hours']} ชม. "
+                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น "
                         f"(ดอก finishing {machining_result.breakdown['finish_tool_mm_used']} มม.)"
                     )
+                    op_qty_rough = st.number_input(
+                        "ชั่วโมงกัดหยาบ (Roughing)" if lang == "TH" else "Roughing hours",
+                        min_value=0.0, value=float(suggested_rough), step=0.25,
+                        key=f"op_qty_rough_{round(float(suggested_rough), 4)}"
+                    )
+                    op_qty_finish = st.number_input(
+                        "ชั่วโมงกัดละเอียด (Finishing)" if lang == "TH" else "Finishing hours",
+                        min_value=0.0, value=float(suggested_finish), step=0.25,
+                        key=f"op_qty_finish_{round(float(suggested_finish), 4)}"
+                    )
+                    op_qty = None  # Robot ใช้ op_qty_rough / op_qty_finish แยกกันแทน ไม่ใช้ตัวนี้
                 elif selected_machine == "3D Print FDM":
-                    print_qty_actual = st.number_input(
-                        "จำนวนที่ต้องพิมพ์จริง (เช่น ต้นแบบสำหรับทำโมล อาจน้อยกว่าจำนวนผลิตทั้งหมด)"
-                        if lang == "TH" else
-                        "Actual pieces to print (e.g. molding masters — may be fewer than total Qty)",
-                        min_value=1, value=int(production_qty), step=1,
-                        key="fdm_print_qty_actual",
-                    )
-                    print_result = estimate_3d_print_hours(
-                        volume_cm3=per_piece_volume_cm3 * print_qty_actual,
-                    )
+                    # ใช้ปริมาตรต่อ 1 ชิ้นล้วนๆ (อุณหภูมิ/feed rate เครื่องคงที่ ไม่ขึ้นกับรูปทรง)
+                    print_result = estimate_3d_print_hours(volume_cm3=per_piece_volume_cm3)
                     suggested_qty = print_result.hours
                     st.caption(
-                        f"⚙️ ประมาณอัตโนมัติ (พิมพ์ {print_qty_actual} ชิ้น): "
-                        f"ปริมาตรพิมพ์จริง {print_result.breakdown['effective_volume_cm3']} cm³ "
-                        f"({print_result.breakdown['extrusion_length_m']} ม. เส้นพลาสติก)"
+                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น จากปริมาตรพิมพ์จริง "
+                        f"{print_result.breakdown['effective_volume_cm3']} cm³ "
+                        f"(อัตรา {print_result.breakdown['hours_per_cm3']:.5f} ชม./cm³)"
+                    )
+                    op_qty = st.number_input(
+                        t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
+                        key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
                     )
                 else:
                     suggested_qty = 1.0
-                # ⚠️ key ต้องเปลี่ยนตามค่าที่คำนวณได้ (suggested_qty) ไม่ใช่แค่ชื่อเครื่อง
-                # ไม่งั้น Streamlit จะค้างค่าตัวเลขเก่าไว้ ไม่ยอมอัปเดตตาม value= ใหม่
-                # เวลาพารามิเตอร์อื่น (เช่น จำนวนที่ต้องพิมพ์จริง, complexity level) เปลี่ยนไป
-                op_qty = st.number_input(
-                    t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
-                    key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
-                )
+                    op_qty = st.number_input(
+                        t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
+                        key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
+                    )
             else:  # Baht/Unit (e.g. 3D Print SLA)
                 op_qty = st.number_input(
                     t["op_qty_unit"], min_value=0.0, value=1.0, step=1.0,
@@ -1037,15 +1040,32 @@ elif page == t["page_2_name"]:
             st.write(" ")
             st.write(" ")
             if st.button(t["op_add_btn"], use_container_width=True, key="add_op_btn"):
-                new_op = {
-                    "machine": selected_machine,
-                    "unit": op_unit,
-                    "rate": op_rate,
-                    "qty": op_qty,
-                    "total": op_rate * op_qty,
-                }
-                st.session_state["selected_operations"].append(new_op)
-                st.toast(f"Added {selected_machine} x {op_qty} {op_unit}")
+                if selected_machine == "Robot" and op_unit == "Baht/Hr.":
+                    # Robot: เพิ่ม 2 แถวแยกกัน (กัดหยาบ / กัดละเอียด) ไม่รวมเป็นค่าเดียว
+                    rough_label = f"{selected_machine} (กัดหยาบ)" if lang == "TH" else f"{selected_machine} (Roughing)"
+                    finish_label = f"{selected_machine} (กัดละเอียด)" if lang == "TH" else f"{selected_machine} (Finishing)"
+                    new_ops = [
+                        {
+                            "machine": rough_label, "unit": op_unit, "rate": op_rate,
+                            "qty": op_qty_rough, "total": op_rate * op_qty_rough,
+                        },
+                        {
+                            "machine": finish_label, "unit": op_unit, "rate": op_rate,
+                            "qty": op_qty_finish, "total": op_rate * op_qty_finish,
+                        },
+                    ]
+                    st.session_state["selected_operations"].extend(new_ops)
+                    st.toast(f"Added Robot Roughing {op_qty_rough} + Finishing {op_qty_finish} {op_unit}")
+                else:
+                    new_op = {
+                        "machine": selected_machine,
+                        "unit": op_unit,
+                        "rate": op_rate,
+                        "qty": op_qty,
+                        "total": op_rate * op_qty,
+                    }
+                    st.session_state["selected_operations"].append(new_op)
+                    st.toast(f"Added {selected_machine} x {op_qty} {op_unit}")
 
     if st.session_state["selected_operations"]:
         st.markdown(f"###### {t['op_selected_list']}")
