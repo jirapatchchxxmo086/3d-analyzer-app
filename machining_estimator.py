@@ -61,14 +61,13 @@ FOAM_CNC_MACHINES = {
     },
 }
 
-# ⚠️ ค่าเหล่านี้ปรับจากการเทียบกับงานจริง 1 ชิ้น (17 Aug 2026, Color Culture — โมเดลขนาดใกล้เคียง)
-# ยังเป็นการ calibrate จากจุดอ้างอิงเดียว ควรเก็บงานจริงเพิ่มมาเทียบอีกเพื่อความมั่นใจ
+# ⚠️ ปรับตามคำแนะนำของทีม: องศาหลอมพลาสติกและ feed rate ของเครื่องคงที่เสมอ
+# (ไม่ได้แปรตามรูปทรงหรือความซับซ้อนของชิ้นงาน) เวลาจึงเป็นสัดส่วนตรงกับ "ปริมาตรที่ต้องพิมพ์จริง"
+# เท่านั้น — ไม่ต้องคำนวณผ่านความยาวเส้นพลาสติก/cross-section ให้ซับซ้อนเกินจำเป็น
+# ค่า hours_per_cm3 ปรับจากการเทียบกับงานจริง 1 ชิ้น (17 Aug 2026): 28 ชม. / 1685.21 cm³ effective
 FDM_PRINT_DEFAULTS = {
-    "print_speed_mm_min": 3000,
-    "layer_height_mm": 0.6,        # ปรับจาก 0.2 -> 0.6 (เครื่องพิมพ์ใหญ่ใช้ layer หนากว่าเครื่องตั้งโต๊ะ)
-    "line_width_mm": 0.7,          # ปรับจาก 0.4 -> 0.7 (หัวฉีดใหญ่กว่ามาตรฐาน 0.4mm)
-    "shell_fraction": 0.3,
-    "overhead_factor": 1.25,
+    "hours_per_cm3": 0.016615,
+    "shell_fraction": 0.3,       # สัดส่วนปริมาตรที่เป็นเปลือกนอก (ไม่ขึ้นกับ % infill)
     "min_job_hours": 0.25,
 }
 
@@ -140,40 +139,29 @@ def estimate_foam_cnc_hours(
 def estimate_3d_print_hours(
     volume_cm3: float,
     infill_pct: float = 20,
-    print_speed_mm_min: float = None,
-    layer_height_mm: float = None,
-    line_width_mm: float = None,
+    hours_per_cm3: float = None,
     shell_fraction: float = None,
-    overhead_factor: float = None,
 ) -> MachiningEstimate:
     """
-    ประเมินชั่วโมง 3D Print FDM จากปริมาตรชิ้นงานและค่าพารามิเตอร์การพิมพ์
+    ประเมินชั่วโมง 3D Print FDM แบบเชิงเส้นตรงจากปริมาตร (ไม่ผ่านความยาวเส้น/feed rate)
+    เพราะอุณหภูมิและความเร็วพิมพ์ของเครื่องคงที่เสมอ ไม่แปรตามรูปทรงชิ้นงาน
 
-    volume_cm3 : ปริมาตรชิ้นงานจริง (ไม่ใช่ bounding box) หน่วย cm3
-    infill_pct : เปอร์เซ็นต์ infill ที่จะใช้พิมพ์ (0-100)
+    volume_cm3 : ปริมาตรชิ้นงานจริง (ไม่ใช่ bounding box) หน่วย cm3 — ของ "1 ชิ้น" เท่านั้น
+    infill_pct : เปอร์เซ็นต์ infill ที่จะใช้พิมพ์ (0-100) ยังมีผลเพราะเปลี่ยนปริมาตรที่ต้องพิมพ์จริง
     """
     p = FDM_PRINT_DEFAULTS
-    print_speed_mm_min = print_speed_mm_min or p["print_speed_mm_min"]
-    layer_height_mm = layer_height_mm or p["layer_height_mm"]
-    line_width_mm = line_width_mm or p["line_width_mm"]
+    hours_per_cm3 = hours_per_cm3 or p["hours_per_cm3"]
     shell_fraction = shell_fraction if shell_fraction is not None else p["shell_fraction"]
-    overhead_factor = overhead_factor or p["overhead_factor"]
 
-    volume_mm3 = max(volume_cm3, 0) * 1000.0
     infill_fraction = max(0.0, min(100.0, infill_pct)) / 100.0
+    effective_volume_cm3 = max(volume_cm3, 0) * (shell_fraction + (1 - shell_fraction) * infill_fraction)
 
-    effective_volume_mm3 = volume_mm3 * (shell_fraction + (1 - shell_fraction) * infill_fraction)
-    cross_section_mm2 = layer_height_mm * line_width_mm
-    extrusion_length_mm = effective_volume_mm3 / cross_section_mm2 if cross_section_mm2 > 0 else 0.0
-
-    time_min = (extrusion_length_mm / print_speed_mm_min if print_speed_mm_min > 0 else 0.0) * overhead_factor
-    total_hours = max(time_min / 60.0, p["min_job_hours"])
+    total_hours = max(effective_volume_cm3 * hours_per_cm3, p["min_job_hours"])
 
     return MachiningEstimate(
         hours=round(total_hours, 2),
         breakdown={
-            "effective_volume_cm3": round(effective_volume_mm3 / 1000.0, 2),
-            "extrusion_length_m": round(extrusion_length_mm / 1000.0, 1),
-            "overhead_factor": overhead_factor,
+            "effective_volume_cm3": round(effective_volume_cm3, 2),
+            "hours_per_cm3": hours_per_cm3,
         },
     )
