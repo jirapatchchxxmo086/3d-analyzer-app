@@ -130,6 +130,56 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
+# 🧮 Precision Kinematics Calculation Helper
+# ==========================================
+def calculate_precision_machining_estimation(
+    mesh,
+    feed_rate_xy=5000.0,   # mm/min
+    stepover_rough=15.0,    # mm
+    stepdown_rough=10.0,    # mm
+    stepover_finish=3.0,    # mm
+    rapid_factor=1.15
+):
+    """
+    คำนวณประเมินเวลาเครื่องจักรและปริมาตรวัสดุแบบ Precision โดยอิงจาก Kinematics & MRR
+    โดยไม่ต้องสร้างไฟล์ 3D Cut จริง
+    """
+    if mesh is None:
+        return {"roughing_hours": 0.0, "finishing_hours": 0.0, "total_hours": 0.0, "raw_foam_m3": 0.0, "glue_g": 0.0}
+
+    # 1. Bounding Box & Raw Material Analysis
+    obb = mesh.bounding_box_oriented
+    raw_foam_volume_mm3 = obb.volume
+    raw_foam_m3 = raw_foam_volume_mm3 / 1e9
+
+    # 2. Material Removal Rate (MRR) - Roughing
+    exact_volume_mm3 = mesh.volume if getattr(mesh, 'is_watertight', False) else mesh.convex_hull.volume
+    waste_volume_mm3 = max(raw_foam_volume_mm3 - exact_volume_mm3, 0.0)
+    
+    mrr_mm3_per_min = feed_rate_xy * stepover_rough * stepdown_rough
+    roughing_time_min = waste_volume_mm3 / mrr_mm3_per_min if mrr_mm3_per_min > 0 else 0.0
+
+    # 3. Surface Toolpath Analysis - Finishing
+    total_surface_area_mm2 = mesh.area
+    finishing_toolpath_length_mm = total_surface_area_mm2 / stepover_finish if stepover_finish > 0 else 0.0
+    finishing_time_min = finishing_toolpath_length_mm / feed_rate_xy if feed_rate_xy > 0 else 0.0
+
+    # 4. Total Machining Hours
+    roughing_hours = (roughing_time_min * rapid_factor) / 60.0
+    finishing_hours = (finishing_time_min * rapid_factor) / 60.0
+    
+    # 5. Glue Estimation (Based on surface area)
+    glue_g = total_surface_area_mm2 * 0.0002
+
+    return {
+        "roughing_hours": round(roughing_hours, 2),
+        "finishing_hours": round(finishing_hours, 2),
+        "total_hours": round(roughing_hours + finishing_hours, 2),
+        "raw_foam_m3": round(raw_foam_m3, 4),
+        "glue_g": round(glue_g, 1)
+    }
+
+# ==========================================
 # 🌐 2. Language Translations Dictionary
 # ==========================================
 TEXTS = {
@@ -771,7 +821,7 @@ if page == t["page_1_name"]:
 
             st.markdown(f"""
             <div style="background:#FFFFFF; border:1px solid #E8D5BE; border-radius:12px;
-                        padding:14px 18px; display:flex; align-items:center; justify-content:space-between;
+                        padding:14px 18px; display:flex; align-items:center; justify-space-between;
                         margin-bottom:1.2rem;">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <div style="width:38px; height:38px; border-radius:8px; background:#F3E7D8;
@@ -871,7 +921,7 @@ elif page == t["page_2_name"]:
         load_color_finish_db,
         COAT_PROCESS_SHEET_NAME,
     )
-    from machining_estimator import estimate_foam_cnc_hours, estimate_3d_print_hours
+    from machining_estimator import estimate_3d_print_hours
 
     MATERIAL_MASTER_DB = load_material_master_db()
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
@@ -922,8 +972,6 @@ elif page == t["page_2_name"]:
     bbox_w_mm = float(st.session_state.get("width_x_mm", 0.0))
     bbox_l_mm = float(st.session_state.get("length_y_mm", 0.0))
     bbox_h_mm = float(st.session_state.get("height_z_mm", 0.0))
-    bbox_volume_cm3 = (bbox_w_mm * bbox_l_mm * bbox_h_mm) / 1000.0
-    per_piece_removal_cm3 = max(bbox_volume_cm3 - per_piece_volume_cm3, 0.0)
 
     with col_in2:
         calc_area = st.number_input(
@@ -954,27 +1002,24 @@ elif page == t["page_2_name"]:
 
         with o_col3:
             if op_unit == "Baht/Hr.":
-                if selected_machine == "Robot":
-                    machining_result = estimate_foam_cnc_hours(
-                        volume_removal_cm3=per_piece_removal_cm3,
-                        surface_area_sqm=per_piece_area,
-                        complexity_level=complexity_level,
+                if selected_machine in ["Robot", "CNC Router", "Robot / Router"]:
+                    # เรียกใช้อัลกอริทึม Precision Estimation
+                    precision_res = calculate_precision_machining_estimation(
+                        mesh=st.session_state.get("mesh")
                     )
-                    suggested_rough = machining_result.breakdown["roughing_hours"]
-                    suggested_finish = machining_result.breakdown["finishing_hours"]
-                    st.caption(
-                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น "
-                        f"(ดอก finishing {machining_result.breakdown['finish_tool_mm_used']} มม.)"
-                    )
+                    suggested_rough = precision_res["roughing_hours"]
+                    suggested_finish = precision_res["finishing_hours"]
+                    
+                    st.caption("⚡ คำนวณด้วย Precision Kinematics Algorithm")
                     op_qty_rough = st.number_input(
                         "ชั่วโมงกัดหยาบ (Roughing)" if lang == "TH" else "Roughing hours",
                         min_value=0.0, value=float(suggested_rough), step=0.25,
-                        key=f"op_qty_rough_{selected_machine}"
+                        key=f"op_qty_rough_{round(float(suggested_rough), 4)}"
                     )
                     op_qty_finish = st.number_input(
                         "ชั่วโมงกัดละเอียด (Finishing)" if lang == "TH" else "Finishing hours",
                         min_value=0.0, value=float(suggested_finish), step=0.25,
-                        key=f"op_qty_finish_{selected_machine}"
+                        key=f"op_qty_finish_{round(float(suggested_finish), 4)}"
                     )
                     op_qty = None
                 elif selected_machine == "3D Print FDM":
@@ -987,13 +1032,13 @@ elif page == t["page_2_name"]:
                     )
                     op_qty = st.number_input(
                         t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
-                        key=f"op_qty_{selected_machine}"
+                        key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
                     )
                 else:
                     suggested_qty = 1.0
                     op_qty = st.number_input(
                         t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
-                        key=f"op_qty_{selected_machine}"
+                        key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
                     )
             else:
                 op_qty = st.number_input(
@@ -1005,7 +1050,7 @@ elif page == t["page_2_name"]:
             st.write(" ")
             st.write(" ")
             if st.button(t["op_add_btn"], use_container_width=True, key="add_op_btn"):
-                if selected_machine == "Robot" and op_unit == "Baht/Hr.":
+                if selected_machine in ["Robot", "CNC Router", "Robot / Router"] and op_unit == "Baht/Hr.":
                     rough_label = f"{selected_machine} (กัดหยาบ)" if lang == "TH" else f"{selected_machine} (Roughing)"
                     finish_label = f"{selected_machine} (กัดละเอียด)" if lang == "TH" else f"{selected_machine} (Finishing)"
                     new_ops = [
@@ -1019,7 +1064,7 @@ elif page == t["page_2_name"]:
                         },
                     ]
                     st.session_state["selected_operations"].extend(new_ops)
-                    st.toast(f"Added Robot Roughing {op_qty_rough} + Finishing {op_qty_finish} {op_unit}")
+                    st.toast(f"Added {selected_machine} Roughing {op_qty_rough} + Finishing {op_qty_finish} {op_unit}")
                 else:
                     new_op = {
                         "machine": selected_machine,
@@ -1047,7 +1092,7 @@ elif page == t["page_2_name"]:
                 st.rerun()
 
     # ----------------------------------------------------------------------
-    # 🧩 Plotly Foam Slicing Visualizer
+    # 🧩 Plotly Foam Slicing Visualizer & Precision Material Metrics
     # ----------------------------------------------------------------------
     x_mm = st.session_state.get("width_x_mm", 0.0)
     y_mm = st.session_state.get("length_y_mm", 0.0)
@@ -1077,9 +1122,6 @@ elif page == t["page_2_name"]:
         st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
         submesh_count = st.session_state.get("submesh_count", 1)
-        aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
-        is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
-
         col_rec1, col_rec2 = st.columns([2, 1])
 
         with col_rec1:
@@ -1090,6 +1132,9 @@ elif page == t["page_2_name"]:
                 * **ข้อดี:** ไม่ต้องผ่าไฟล์ใหม่ ประหยัดเนื้อโฟมได้สูงสุด และสามารถรันกัดพร้อมกันหลายเครื่องได้ทันที
                 """)
             else:
+                aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
+                is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
+                
                 if is_flat:
                     st.info("🎯 **แนะนำ: ตัดแบ่ง 2 ซีกหน้า-หลัง (2-Plane Split / Half-Split)**")
                     st.write("""
@@ -1110,15 +1155,9 @@ elif page == t["page_2_name"]:
                     """)
 
         with col_rec2:
-            if submesh_count > 1:
-                est_time_saved = 45
-                est_material_saved = 35
-            else:
-                est_time_saved = 35 if is_flat else (40 if aspect_ratio > 2.2 else 20)
-                est_material_saved = 30 if is_flat else (35 if aspect_ratio > 2.2 else 15)
-                
-            st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
-            st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
+            prec_est = calculate_precision_machining_estimation(current_mesh)
+            st.metric(label="📦 ปริมาตรก้อนโฟมดิบรวม (OBB)", value=f"{prec_est['raw_foam_m3']} m³")
+            st.metric(label="🧪 ปริมาณกาว PU สำหรับประกอบ", value=f"~{prec_est['glue_g']} g")
 
     # ==========================================
     # 📦 ระบบเลือกวัสดุจาก Master Data
