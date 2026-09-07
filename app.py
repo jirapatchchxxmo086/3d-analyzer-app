@@ -1103,7 +1103,8 @@ elif page == t["page_2_name"]:
                 y_mm=y_mm,
                 z_mm=z_mm,
                 max_segment_mm=max_seg_m * 1000.0,
-                wall_thickness_mm=wall_thick
+                wall_thickness_mm=wall_thick,
+                mesh=st.session_state.get("mesh")
             )
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
             st.markdown("---")
