@@ -1107,6 +1107,58 @@ elif page == t["page_2_name"]:
             )
 
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
+            st.markdown("---")
+            st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
+
+            # ตรวจสอบจำนวน Sub-mesh (ถ้าไม่มีค่าใน session_state จะกำหนดเป็น 1 ชิ้น)
+            submesh_count = st.session_state.get("submesh_count", 1)
+
+            col_rec1, col_rec2 = st.columns([2, 1])
+
+            with col_rec1:
+                # กรณีที่ 1: ไฟล์แยกชิ้นส่วนมาแล้วจากต้นทาง
+                if submesh_count > 1:
+                    st.success(f"🧩 **ตรวจพบโมเดลแยกชิ้นส่วนแล้ว ({submesh_count} ชิ้นส่วน)**")
+                    st.write("""
+                    * **กลยุทธ์:** นำแต่ละชิ้นส่วน (เช่น แขน, ขา, ลำตัว) เข้ากระบวนการจัดวางบนเตียงกัดแยกกัน
+                    * **ข้อดี:** ไม่ต้องผ่าไฟล์ใหม่ ประหยัดเนื้อโฟมได้สูงสุด และสามารถรันกัดพร้อมกันหลายเครื่องได้ทันที
+                    """)
+                
+                # กรณีที่ 2: ไฟล์เป็นก้อนเดียว (Single Mesh) -> คำนวณตามรูปทรงและมิติ
+                else:
+                    aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
+                    is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
+                    
+                    if is_flat:
+                        st.info("🎯 **แนะนำ: ตัดแบ่ง 2 ซีกหน้า-หลัง (2-Plane Split / Half-Split)**")
+                        st.write("""
+                        * **วิธีจัดวาง:** ผ่าครึ่งโมเดลตามแนวราบ วางโฟมราบกับเตียงกัด (เหมาะกับงานนูนหรือครึ่งองค์)
+                        * **ข้อดี:** ล็อกชิ้นงานง่าย กัดเรียบเนียน ประหยัดเวลา ไม่ต้องใช้เครื่องกัดหลายแกนซับซ้อน
+                        """)
+                    elif aspect_ratio > 2.2:
+                        st.warning("✂️ **แนะนำ: ถอดแยกชิ้นส่วนตามข้อต่อ (Modular Joint Split)**")
+                        st.write("""
+                        * **วิธีจัดวาง:** ใช้ Plane Slice แบ่งโฟมตามสัดส่วนองค์ประกอบ (เช่น หัว, ลำตัว, แขน, ขา)
+                        * **ข้อดี:** ลดการกัด Air-Cutting สุญญากาศรอบตัวโมเดล ประหยัดโฟมก้อนใหญ่ และช่วยให้ดอกกัดเข้าถึงจุดลึกได้ง่ายขึ้น
+                        """)
+                    else:
+                        st.info("📐 **แนะนำ: ตัดแบ่งบล็อกสมมาตร 2–4 ส่วน (Grid / Layer Slicing)**")
+                        st.write("""
+                        * **วิธีจัดวาง:** หั่นโฟมเป็นแผ่น/บล็อกทรงสี่เหลี่ยม 2–4 ชิ้นเท่าๆ กัน
+                        * **ข้อดี:** เข้ากับขนาดบล็อกโฟมมาตรฐาน สะดวกต่อการนำมาต่อกาวและขัดโป๊ว
+                        """)
+
+            with col_rec2:
+                # คำนวณประมาณการประหยัดเวลาและวัสดุ
+                if submesh_count > 1:
+                    est_time_saved = 45
+                    est_material_saved = 35
+                else:
+                    est_time_saved = 35 if is_flat else (40 if aspect_ratio > 2.2 else 20)
+                    est_material_saved = 30 if is_flat else (35 if aspect_ratio > 2.2 else 15)
+                    
+                st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
+                st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
     # ==========================================
     # 📦 ระบบเลือกวัสดุจาก Master Data
     # ==========================================
