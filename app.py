@@ -969,12 +969,12 @@ elif page == t["page_2_name"]:
                     op_qty_rough = st.number_input(
                         "ชั่วโมงกัดหยาบ (Roughing)" if lang == "TH" else "Roughing hours",
                         min_value=0.0, value=float(suggested_rough), step=0.25,
-                        key=f"op_qty_rough_{round(float(suggested_rough), 4)}"
+                        key=f"op_qty_rough_{selected_machine}"
                     )
                     op_qty_finish = st.number_input(
                         "ชั่วโมงกัดละเอียด (Finishing)" if lang == "TH" else "Finishing hours",
                         min_value=0.0, value=float(suggested_finish), step=0.25,
-                        key=f"op_qty_finish_{round(float(suggested_finish), 4)}"
+                        key=f"op_qty_finish_{selected_machine}"
                     )
                     op_qty = None
                 elif selected_machine == "3D Print FDM":
@@ -987,13 +987,13 @@ elif page == t["page_2_name"]:
                     )
                     op_qty = st.number_input(
                         t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
-                        key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
+                        key=f"op_qty_{selected_machine}"
                     )
                 else:
                     suggested_qty = 1.0
                     op_qty = st.number_input(
                         t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
-                        key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
+                        key=f"op_qty_{selected_machine}"
                     )
             else:
                 op_qty = st.number_input(
@@ -1077,6 +1077,9 @@ elif page == t["page_2_name"]:
         st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
         submesh_count = st.session_state.get("submesh_count", 1)
+        aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
+        is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
+
         col_rec1, col_rec2 = st.columns([2, 1])
 
         with col_rec1:
@@ -1087,9 +1090,6 @@ elif page == t["page_2_name"]:
                 * **ข้อดี:** ไม่ต้องผ่าไฟล์ใหม่ ประหยัดเนื้อโฟมได้สูงสุด และสามารถรันกัดพร้อมกันหลายเครื่องได้ทันที
                 """)
             else:
-                aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
-                is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
-                
                 if is_flat:
                     st.info("🎯 **แนะนำ: ตัดแบ่ง 2 ซีกหน้า-หลัง (2-Plane Split / Half-Split)**")
                     st.write("""
