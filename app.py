@@ -19,9 +19,6 @@ st.set_page_config(page_title="3D Model Analyzer & Cost Estimator", page_icon="�
 # ==========================================
 # 🎨 1b. Custom Theme — Studio / Art Workshop, warm
 # ==========================================
-# Base colors (primary/background/text) come from .streamlit/config.toml.
-# This block layers deeper styling on top: cards, metrics, buttons, headers,
-# tables, and expanders — matching the warm coral/amber studio look.
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap');
@@ -92,7 +89,7 @@ st.markdown("""
         border-right: 1px solid #E8D5BE;
     }
 
-    /* Sidebar nav pills (built from st.sidebar.radio) */
+    /* Sidebar nav pills */
     section[data-testid="stSidebar"] div[data-testid="stRadio"] > div {
         flex-direction: column;
         gap: 4px;
@@ -113,7 +110,7 @@ st.markdown("""
     section[data-testid="stSidebar"] div[data-testid="stRadio"] label [data-baseweb="radio"],
     section[data-testid="stSidebar"] div[data-testid="stRadio"] label [data-baseweb="radio"] > div,
     section[data-testid="stSidebar"] div[data-testid="stRadio"] label svg {
-        display: none !important;  /* hide the default radio dot, whichever DOM shape Streamlit renders */
+        display: none !important;
     }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] label:hover {
         background: #EADFCC;
@@ -126,7 +123,6 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* Success / info / warning boxes keep readable warm-tinted borders */
     div[data-testid="stAlert"] {
         border-radius: 8px;
     }
@@ -142,7 +138,6 @@ TEXTS = {
         "page_1_name": "📦 แบบจำลอง 3 มิติและพื้นผิว",
         "page_2_name": "💰 ประเมินราคา",
         "lang_select": "🌐 เลือกภาษา / Language",
-        # Page 1
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
         "p1_sub": "อัปโหลดไฟล์โมเดล 3D เพื่อวิเคราะห์ขนาด Bounding Box, พื้นที่ผิว, ปริมาตร และความซับซ้อนของพื้นผิวอัตโนมัติ",
         "welcome_title": "สวัสดีค่ะ",
@@ -178,7 +173,6 @@ TEXTS = {
         "normal_dev": "ความเบี่ยงเบนแนวฉากผิวเฉลี่ย:",
         "face_density": "ความหนาแน่นโพลีกอน:",
         "complexity_err": "⚠️ ไม่สามารถวิเคราะห์ระดับความซับซ้อนของพื้นผิวได้\n\nสาเหตุ: {}",
-        # Page 2
         "p2_title": "💰 การคำนวณต้นทุน & ประมาณการราคา",
         "p2_sub": "ระบบดึงข้อมูลพื้นที่ผิวจากหน้าแรกมาประมวลผลร่วมกับสูตรคำนวณ Robot และ Material Master Data",
         "model_info": "📌 **ข้อมูลโมเดลปัจจุบันจากหน้าแรก:** ไฟล์ `{}` | ขนาด `{}` mm | พื้นที่ผิว `{:.3f}` ตร.ม.",
@@ -238,7 +232,6 @@ TEXTS = {
         "page_1_name": "📦 3D Model & Surface",
         "page_2_name": "💰 Cost Estimator",
         "lang_select": "🌐 Select Language / เลือกภาษา",
-        # Page 1
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
         "p1_sub": "Upload a 3D model file to automatically extract bounding box dimensions, surface area, volume, and surface detail complexity.",
         "welcome_title": "Welcome back",
@@ -274,7 +267,6 @@ TEXTS = {
         "normal_dev": "Average Surface Normal Deviation:",
         "face_density": "Surface Polygon Density:",
         "complexity_err": "⚠️ Unable to analyze surface detail complexity.\n\nReason: {}",
-        # Page 2
         "p2_title": "💰 Costing & Cost Estimate",
         "p2_sub": "Retrieves surface area from Page 1 and processes with Robot and Material Master Data formulas.",
         "model_info": "📌 **Current Model Data from Page 1:** File `{}` | Dimensions `{}` mm | Surface Area `{:.3f}` sq.m.",
@@ -356,11 +348,12 @@ if "selected_operations" not in st.session_state:
     st.session_state["selected_operations"] = []
 if "selected_finishes" not in st.session_state:
     st.session_state["selected_finishes"] = []
+if "mesh" not in st.session_state:
+    st.session_state["mesh"] = None
 
 # ==========================================
 # 🧭 4. Sidebar Navigation & Language Selector
 # ==========================================
-# --- Sidebar brand header (logo + app name), like the top-left brand mark ---
 st.sidebar.markdown("""
 <div style="display:flex; align-items:center; gap:10px; padding:4px 0 18px;">
     <div style="width:38px; height:38px; border-radius:10px; background:#F3E7D8;
@@ -378,7 +371,7 @@ lang = st.sidebar.selectbox(
     index=0 if st.session_state["language"] == "TH" else 1
 )
 st.session_state["language"] = lang
-t = TEXTS[lang]  # Short access for current language dict
+t = TEXTS[lang]
 
 nav_options = [t["page_1_name"], t["page_2_name"]]
 if "nav_page_choice" not in st.session_state or st.session_state["nav_page_choice"] not in nav_options:
@@ -402,9 +395,6 @@ if page == t["page_1_name"]:
     </div>
     """, unsafe_allow_html=True)
 
-    # ไฟล์ 3D ทุกไฟล์ถือว่าเป็นหน่วยมิลลิเมตร (mm) เสมอ — ถ้าไฟล์จริงเป็นหน่วยอื่น
-    # ผู้ใช้แก้ไขขนาดจริงได้ตรงๆ ในแผงปรับขนาดโมเดล (ด้านล่าง) ซึ่งคำนวณ
-    # พื้นที่ผิว/ปริมาตรใหม่แม่นยำ 100% ตามขนาดที่แก้ไข ไม่ต้องพึ่งการเดาหน่วยไฟล์อีกต่อไป
     scale_to_m = 0.001
 
     def process_and_clean_mesh(loaded_data):
@@ -646,7 +636,6 @@ if page == t["page_1_name"]:
     </html>
     """)
 
-
     def render_3d_viewer(mesh_obj):
         try:
             if isinstance(mesh_obj, trimesh.PointCloud) or len(mesh_obj.vertices) == 0:
@@ -676,9 +665,6 @@ if page == t["page_1_name"]:
 
                 is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
-                # --- Convert the raw mesh to real millimetres once, using the
-                # file-unit interpretation above. This becomes the "base" shape
-                # that the size-editor panel scales from. ---
                 mesh_mm = mesh.copy()
                 mesh_mm.apply_scale(scale_to_m * 1000.0)
                 base_extents = mesh_mm.extents
@@ -725,9 +711,6 @@ if page == t["page_1_name"]:
                     st.rerun()
                 st.sidebar.caption(t["size_recalc_note"])
 
-                # --- Apply the (possibly non-uniform) scale the user dialed in,
-                # then recompute area/volume from the ACTUAL transformed mesh —
-                # exact either way, uniform or not. ---
                 kx = st.session_state["dim_w_mm"] / base_w_mm if base_w_mm > 0 else 1.0
                 ky = st.session_state["dim_l_mm"] / base_l_mm if base_l_mm > 0 else 1.0
                 kz = st.session_state["dim_h_mm"] / base_h_mm if base_h_mm > 0 else 1.0
@@ -745,9 +728,6 @@ if page == t["page_1_name"]:
                 width_x_m = width_x_mm / 1000.0
                 length_y_m = length_y_mm / 1000.0
                 height_z_m = height_z_mm / 1000.0
-                width_x_cm = width_x_mm / 10.0
-                length_y_cm = length_y_mm / 10.0
-                height_z_cm = height_z_mm / 10.0
 
                 surface_area_m2 = 0.0
                 volume_m3 = 0.0
@@ -776,9 +756,9 @@ if page == t["page_1_name"]:
                 surface_area_cm2 = surface_area_m2 * 10_000.0
                 volume_cm3 = volume_m3 * 1_000_000.0
 
-                # final_mesh is already in real millimetres, so scale_to_m=0.001 here
                 complexity = analyze_surface_complexity(final_mesh, 0.001, is_point_cloud)
 
+                st.session_state["mesh"] = final_mesh
                 st.session_state["surface_area_sqm"] = surface_area_m2
                 st.session_state["volume_cm3"] = volume_cm3
                 st.session_state["dimensions_str"] = f"{width_x_mm:.0f}*{length_y_mm:.0f}*{height_z_mm:.0f}"
@@ -884,38 +864,28 @@ elif page == t["page_2_name"]:
     ))
 
     from data_loader import (
-    load_material_master_db,
-    load_rate_dict,
-    load_mold_rates,
-    load_work_rates,
-    load_color_finish_db,
-    COAT_PROCESS_SHEET_NAME,
-)
+        load_material_master_db,
+        load_rate_dict,
+        load_mold_rates,
+        load_work_rates,
+        load_color_finish_db,
+        COAT_PROCESS_SHEET_NAME,
+    )
     from machining_estimator import estimate_foam_cnc_hours, estimate_3d_print_hours
-    # 🗂️ Material Master Data Database
+
     MATERIAL_MASTER_DB = load_material_master_db()
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
 
-    # ==========================================
-    # 🎨 Hard Coat Master Pricing (จากใบประเมินราคาโรงงานจริง)
-    # ==========================================
-    # ทุกอัตราเป็น ฿/ตร.ม. เว้นแต่จะระบุไว้เป็นอย่างอื่น
-
-    # 1) กระบวนการเคลือบผิว (Coating Process) — คิดตามพื้นที่ทำสี/เคลือบผิวทั้งล็อต
     COAT_PROCESS_RATES = load_rate_dict(COAT_PROCESS_SHEET_NAME, "process_name", "rate")
     MOLD_RATES = load_mold_rates()
     WORK_RATES = load_work_rates()
     COLOR_FINISH_DB = load_color_finish_db()
-    # 5) ข้อมูลอ้างอิง — อัตราแรงงานรายวัน และจำนวนชั่วโมงแนะนำตามระดับความซับซ้อน (Level)
-    #    ยังไม่ผูกเข้ากับราคารวมอัตโนมัติ ใช้เป็นตัวช่วยประกอบการตัดสินใจตั้งชั่วโมง/เรทงาน Work ด้านบน
+
     LABOR_RATES = {"Engineer": 1000, "Worker": 500, "Designer": 2000}
     HARD_COAT_HOURS = {1: 2, 2: 3, 3: 4, 4: 6, 5: 8, 6: 12, 7: 15, 8: 20}
     SANDING_HOURS   = {1: 3, 2: 4, 3: 5, 4: 4, 5: 6, 6: 8, 7: 12, 8: 15}
     PAINTING_HOURS  = {1: 4, 2: 5, 3: 6, 4: 8, 5: 15, 6: 20, 7: 30, 8: 40}
 
-    # 🏭 Machine Master Data — billing unit per machine type (from factory Excel IFS formula).
-    # Everything is Baht/Hr. except 3D Print SLA, which bills per finished unit (Baht/Unit).
-    # Add/remove machine types here — the Operations UI below reads this list automatically.
     MACHINE_TYPES = {
         "Robot": "Baht/Hr.",
         "CNC Router": "Baht/Hr.",
@@ -931,7 +901,7 @@ elif page == t["page_2_name"]:
         "3D Print SLA": "Baht/Unit",
         "Structure": "Baht/Hr.",
     }
-    # Default machine rates (฿) — placeholders until real factory rates are entered; editable per-operation in the UI.
+
     MACHINE_DEFAULT_RATES = {
         "Robot": 300, "CNC Router": 300, "Hotwire": 200, "Robot / Router": 300,
         "Robot / Hotwire": 300, "CNC Router / Hotwire": 300, "Water Jet": 800,
@@ -939,7 +909,6 @@ elif page == t["page_2_name"]:
         "3D Print FDM": 50, "3D Print SLA": 150, "Structure": 250,
     }
 
-    # 1. ข้อมูลทั่วไป
     col_in1, col_in2 = st.columns(2)
     with col_in1:
         project_name = st.text_input(t["project_name"], value=st.session_state["file_name"])
@@ -949,7 +918,6 @@ elif page == t["page_2_name"]:
     per_piece_area = float(st.session_state["surface_area_sqm"])
     suggested_batch_area = round(per_piece_area * production_qty, 4)
 
-    # ข้อมูลสำหรับประเมิน Machining Hours อัตโนมัติ (Foam CNC / 3D Print)
     per_piece_volume_cm3 = float(st.session_state.get("volume_cm3", 0.0))
     bbox_w_mm = float(st.session_state.get("width_x_mm", 0.0))
     bbox_l_mm = float(st.session_state.get("length_y_mm", 0.0))
@@ -974,12 +942,10 @@ elif page == t["page_2_name"]:
         with o_col1:
             selected_machine = st.selectbox(t["op_select_machine"], list(MACHINE_TYPES.keys()))
 
-        op_unit = MACHINE_TYPES[selected_machine]  # "Baht/Hr." or "Baht/Unit"
+        op_unit = MACHINE_TYPES[selected_machine]
         default_rate = MACHINE_DEFAULT_RATES.get(selected_machine, 0)
 
         with o_col2:
-            # key includes the machine name so switching machines gives a fresh widget
-            # (a fixed key would make Streamlit keep the old rate on rerun and ignore value=).
             op_rate = st.number_input(
                 f"{t['op_rate']} ({op_unit})",
                 min_value=0.0, value=float(default_rate), step=10.0,
@@ -988,7 +954,6 @@ elif page == t["page_2_name"]:
 
         with o_col3:
             if op_unit == "Baht/Hr.":
-                # ประเมินชั่วโมงต่อ "1 ชิ้นงาน" เสมอ (ไม่คูณจำนวนผลิต) — ทีมงานคูณเองตอนใช้จริง
                 if selected_machine == "Robot":
                     machining_result = estimate_foam_cnc_hours(
                         volume_removal_cm3=per_piece_removal_cm3,
@@ -1011,9 +976,8 @@ elif page == t["page_2_name"]:
                         min_value=0.0, value=float(suggested_finish), step=0.25,
                         key=f"op_qty_finish_{round(float(suggested_finish), 4)}"
                     )
-                    op_qty = None  # Robot ใช้ op_qty_rough / op_qty_finish แยกกันแทน ไม่ใช้ตัวนี้
+                    op_qty = None
                 elif selected_machine == "3D Print FDM":
-                    # ใช้ปริมาตรต่อ 1 ชิ้นล้วนๆ (อุณหภูมิ/feed rate เครื่องคงที่ ไม่ขึ้นกับรูปทรง)
                     print_result = estimate_3d_print_hours(volume_cm3=per_piece_volume_cm3)
                     suggested_qty = print_result.hours
                     st.caption(
@@ -1031,7 +995,7 @@ elif page == t["page_2_name"]:
                         t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
                         key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
                     )
-            else:  # Baht/Unit (e.g. 3D Print SLA)
+            else:
                 op_qty = st.number_input(
                     t["op_qty_unit"], min_value=0.0, value=1.0, step=1.0,
                     key=f"op_qty_{selected_machine}"
@@ -1042,7 +1006,6 @@ elif page == t["page_2_name"]:
             st.write(" ")
             if st.button(t["op_add_btn"], use_container_width=True, key="add_op_btn"):
                 if selected_machine == "Robot" and op_unit == "Baht/Hr.":
-                    # Robot: เพิ่ม 2 แถวแยกกัน (กัดหยาบ / กัดละเอียด) ไม่รวมเป็นค่าเดียว
                     rough_label = f"{selected_machine} (กัดหยาบ)" if lang == "TH" else f"{selected_machine} (Roughing)"
                     finish_label = f"{selected_machine} (กัดละเอียด)" if lang == "TH" else f"{selected_machine} (Finishing)"
                     new_ops = [
@@ -1082,23 +1045,24 @@ elif page == t["page_2_name"]:
             if st.button(t["op_clear_btn"]):
                 st.session_state["selected_operations"] = []
                 st.rerun()
-    # ----------------------------------------------------------------------
-        # 🧩 ส่วนแสดง Plotly Foam Slicing Visualizer (วางใต้ส่วน Robot / เครื่องจักร)
-        # ----------------------------------------------------------------------
-        x_mm = st.session_state.get("width_x_mm", 0.0)
-        y_mm = st.session_state.get("length_y_mm", 0.0)
-        z_mm = st.session_state.get("height_z_mm", 0.0)
 
-        if x_mm > 0 and y_mm > 0 and z_mm > 0:
-            st.markdown("---")
-            with st.expander("🧩 ภาพจำลองผังการตัดแบ่งบล็อกโฟม (Foam Slicing Visualizer)", expanded=True):
-                col_v1, col_v2 = st.columns(2)
+    # ----------------------------------------------------------------------
+    # 🧩 Plotly Foam Slicing Visualizer
+    # ----------------------------------------------------------------------
+    x_mm = st.session_state.get("width_x_mm", 0.0)
+    y_mm = st.session_state.get("length_y_mm", 0.0)
+    z_mm = st.session_state.get("height_z_mm", 0.0)
+
+    if x_mm > 0 and y_mm > 0 and z_mm > 0:
+        st.markdown("---")
+        with st.expander("🧩 ภาพจำลองผังการตัดแบ่งบล็อกโฟม (Foam Slicing Visualizer)", expanded=True):
+            col_v1, col_v2 = st.columns(2)
             with col_v1:
                 max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 0.5, 2.0, 1.0, 0.1, key="p2_max_seg")
             with col_v2:
                 wall_thick = st.slider("ความหนาเปลือกโฟม Hollow Shell (มม.)", 30, 150, 75, 5, key="p2_wall_thick")
 
-            current_mesh = st.session_state.get("mesh") or st.session_state.get("current_mesh") or st.session_state.get("uploaded_mesh")
+            current_mesh = st.session_state.get("mesh")
 
             fig_grid = create_foam_grid_visualizer(
                 x_mm=x_mm,
@@ -1109,58 +1073,53 @@ elif page == t["page_2_name"]:
                 mesh=current_mesh
             )
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
-            st.markdown("---")
-            st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
-            # ตรวจสอบจำนวน Sub-mesh (ถ้าไม่มีค่าใน session_state จะกำหนดเป็น 1 ชิ้น)
-            submesh_count = st.session_state.get("submesh_count", 1)
+        st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
-            col_rec1, col_rec2 = st.columns([2, 1])
+        submesh_count = st.session_state.get("submesh_count", 1)
+        col_rec1, col_rec2 = st.columns([2, 1])
 
-            with col_rec1:
-                # กรณีที่ 1: ไฟล์แยกชิ้นส่วนมาแล้วจากต้นทาง
-                if submesh_count > 1:
-                    st.success(f"🧩 **ตรวจพบโมเดลแยกชิ้นส่วนแล้ว ({submesh_count} ชิ้นส่วน)**")
-                    st.write("""
-                    * **กลยุทธ์:** นำแต่ละชิ้นส่วน (เช่น แขน, ขา, ลำตัว) เข้ากระบวนการจัดวางบนเตียงกัดแยกกัน
-                    * **ข้อดี:** ไม่ต้องผ่าไฟล์ใหม่ ประหยัดเนื้อโฟมได้สูงสุด และสามารถรันกัดพร้อมกันหลายเครื่องได้ทันที
-                    """)
+        with col_rec1:
+            if submesh_count > 1:
+                st.success(f"🧩 **ตรวจพบโมเดลแยกชิ้นส่วนแล้ว ({submesh_count} ชิ้นส่วน)**")
+                st.write("""
+                * **กลยุทธ์:** นำแต่ละชิ้นส่วน (เช่น แขน, ขา, ลำตัว) เข้ากระบวนการจัดวางบนเตียงกัดแยกกัน
+                * **ข้อดี:** ไม่ต้องผ่าไฟล์ใหม่ ประหยัดเนื้อโฟมได้สูงสุด และสามารถรันกัดพร้อมกันหลายเครื่องได้ทันที
+                """)
+            else:
+                aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
+                is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
                 
-                # กรณีที่ 2: ไฟล์เป็นก้อนเดียว (Single Mesh) -> คำนวณตามรูปทรงและมิติ
+                if is_flat:
+                    st.info("🎯 **แนะนำ: ตัดแบ่ง 2 ซีกหน้า-หลัง (2-Plane Split / Half-Split)**")
+                    st.write("""
+                    * **วิธีจัดวาง:** ผ่าครึ่งโมเดลตามแนวราบ วางโฟมราบกับเตียงกัด (เหมาะกับงานนูนหรือครึ่งองค์)
+                    * **ข้อดี:** ล็อกชิ้นงานง่าย กัดเรียบเนียน ประหยัดเวลา ไม่ต้องใช้เครื่องกัดหลายแกนซับซ้อน
+                    """)
+                elif aspect_ratio > 2.2:
+                    st.warning("✂️ **แนะนำ: ถอดแยกชิ้นส่วนตามข้อต่อ (Modular Joint Split)**")
+                    st.write("""
+                    * **วิธีจัดวาง:** ใช้ Plane Slice แบ่งโฟมตามสัดส่วนองค์ประกอบ (เช่น หัว, ลำตัว, แขน, ขา)
+                    * **ข้อดี:** ลดการกัด Air-Cutting สุญญากาศรอบตัวโมเดล ประหยัดโฟมก้อนใหญ่ และช่วยให้ดอกกัดเข้าถึงจุดลึกได้ง่ายขึ้น
+                    """)
                 else:
-                    aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
-                    is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
-                    
-                    if is_flat:
-                        st.info("🎯 **แนะนำ: ตัดแบ่ง 2 ซีกหน้า-หลัง (2-Plane Split / Half-Split)**")
-                        st.write("""
-                        * **วิธีจัดวาง:** ผ่าครึ่งโมเดลตามแนวราบ วางโฟมราบกับเตียงกัด (เหมาะกับงานนูนหรือครึ่งองค์)
-                        * **ข้อดี:** ล็อกชิ้นงานง่าย กัดเรียบเนียน ประหยัดเวลา ไม่ต้องใช้เครื่องกัดหลายแกนซับซ้อน
-                        """)
-                    elif aspect_ratio > 2.2:
-                        st.warning("✂️ **แนะนำ: ถอดแยกชิ้นส่วนตามข้อต่อ (Modular Joint Split)**")
-                        st.write("""
-                        * **วิธีจัดวาง:** ใช้ Plane Slice แบ่งโฟมตามสัดส่วนองค์ประกอบ (เช่น หัว, ลำตัว, แขน, ขา)
-                        * **ข้อดี:** ลดการกัด Air-Cutting สุญญากาศรอบตัวโมเดล ประหยัดโฟมก้อนใหญ่ และช่วยให้ดอกกัดเข้าถึงจุดลึกได้ง่ายขึ้น
-                        """)
-                    else:
-                        st.info("📐 **แนะนำ: ตัดแบ่งบล็อกสมมาตร 2–4 ส่วน (Grid / Layer Slicing)**")
-                        st.write("""
-                        * **วิธีจัดวาง:** หั่นโฟมเป็นแผ่น/บล็อกทรงสี่เหลี่ยม 2–4 ชิ้นเท่าๆ กัน
-                        * **ข้อดี:** เข้ากับขนาดบล็อกโฟมมาตรฐาน สะดวกต่อการนำมาต่อกาวและขัดโป๊ว
-                        """)
+                    st.info("📐 **แนะนำ: ตัดแบ่งบล็อกสมมาตร 2–4 ส่วน (Grid / Layer Slicing)**")
+                    st.write("""
+                    * **วิธีจัดวาง:** หั่นโฟมเป็นแผ่น/บล็อกทรงสี่เหลี่ยม 2–4 ชิ้นเท่าๆ กัน
+                    * **ข้อดี:** เข้ากับขนาดบล็อกโฟมมาตรฐาน สะดวกต่อการนำมาต่อกาวและขัดโป๊ว
+                    """)
 
-            with col_rec2:
-                # คำนวณประมาณการประหยัดเวลาและวัสดุ
-                if submesh_count > 1:
-                    est_time_saved = 45
-                    est_material_saved = 35
-                else:
-                    est_time_saved = 35 if is_flat else (40 if aspect_ratio > 2.2 else 20)
-                    est_material_saved = 30 if is_flat else (35 if aspect_ratio > 2.2 else 15)
-                    
-                st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
-                st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
+        with col_rec2:
+            if submesh_count > 1:
+                est_time_saved = 45
+                est_material_saved = 35
+            else:
+                est_time_saved = 35 if is_flat else (40 if aspect_ratio > 2.2 else 20)
+                est_material_saved = 30 if is_flat else (35 if aspect_ratio > 2.2 else 15)
+                
+            st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
+            st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
+
     # ==========================================
     # 📦 ระบบเลือกวัสดุจาก Master Data
     # ==========================================
@@ -1216,7 +1175,6 @@ elif page == t["page_2_name"]:
 
     # ==========================================
     # 🎨 Hard Coat: งานเคลือบผิว / โมล / Work / งานสี
-    # (จัดกลุ่มตามตาราง "Hard Coat" ในใบประเมินราคาจริง)
     # ==========================================
     st.markdown("---")
     st.markdown(f"##### {t['finishing_title']}")
@@ -1229,7 +1187,6 @@ elif page == t["page_2_name"]:
     with st.expander(t["finish_expander"], expanded=True):
         hc_cat = st.radio("—", HARDCOAT_CATEGORIES, horizontal=True, key="hc_cat", label_visibility="collapsed")
 
-        # ---- 1) Coating Process ----
         if hc_cat == HARDCOAT_CATEGORIES[0]:
             c1, c2, c3, c4 = st.columns([2, 1.3, 1.3, 1])
             with c1:
@@ -1252,7 +1209,6 @@ elif page == t["page_2_name"]:
                     })
                     st.toast(f"Added {hc_item}")
 
-        # ---- 2) Mold ----
         elif hc_cat == HARDCOAT_CATEGORIES[1]:
             c1, c2 = st.columns(2)
             with c1:
@@ -1269,7 +1225,6 @@ elif page == t["page_2_name"]:
                 })
                 st.toast(f"Added {hc_item}")
 
-        # ---- 3) Work (labor) ----
         elif hc_cat == HARDCOAT_CATEGORIES[2]:
             c1, c2, c3, c4 = st.columns([2, 1.3, 1.3, 1])
             with c1:
@@ -1312,7 +1267,6 @@ elif page == t["page_2_name"]:
                     + " | ".join([f"{k} ฿{v:,.0f}" for k, v in LABOR_RATES.items()])
                 )
 
-        # ---- 4) Color / Surface Finish ----
         else:
             c1, c2, c3, c4 = st.columns([2, 1.6, 1.3, 1])
             with c1:
@@ -1371,7 +1325,6 @@ elif page == t["page_2_name"]:
     st.subheader(t["summary_title"])
 
     machine_total = sum(op["total"] for op in st.session_state["selected_operations"])
-
     material_total_price = sum(item["total_price"] for item in st.session_state["selected_materials"])
     finishing_total = sum(f["total"] for f in st.session_state["selected_finishes"])
 
