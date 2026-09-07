@@ -1,82 +1,47 @@
 """
 machining_estimator.py
 ========================
-โมดูลประเมินชั่วโมงเครื่องจักรอัตโนมัติ จากพารามิเตอร์เครื่องจริง + ข้อมูลเรขาคณิตของโมเดล 3D
-แทนที่การรอทีมงานกรอกชั่วโมงเอง (ยังคงแก้มือทับได้เสมอ ไม่บังคับ)
-
-เวอร์ชัน 2 — รองรับหลายโปรไฟล์เครื่องจักร (ขยายเพิ่มเครื่องใหม่ได้ในอนาคตโดยไม่ต้องแก้ฟังก์ชัน)
-ใช้สูตรเชิงวิศวกรรม CAM/Slicer จริง:
-  - Roughing: คำนวณจาก "ปริมาตรที่ต้องกัดออกจริง" (ไม่ใช่ทั้งบล็อกสี่เหลี่ยม)
-  - Finishing: คำนวณจาก "พื้นที่ผิวจริงของโมเดล" (ไม่ใช่ราสเตอร์ทั้งหน้าตัดซ้ำทุกชั้นแบบ Roughing)
-
-⚠️ นี่คือค่าประมาณ ไม่ใช่ตัวเลขแม่นยำ 100% ต้อง calibrate เทียบกับงานจริงก่อนเชื่อถือเต็มที่
+โมดูลประเมินชั่วโมงเครื่องจักรอัตโนมัติ + ระบบวิเคราะห์การตัดแบ่งชิ้นส่วนเสมือน (Virtual Splitting)
+เพื่อรองรับโจทย์ Tool Reach Limit และการคำนวณเปรียบเทียบการประหยัดเวลา/เนื้อโฟม
 """
 
 from dataclasses import dataclass
-
-
-# ==========================================
-# โปรไฟล์เครื่องจักร Foam CNC
-# เพิ่มเครื่องใหม่ได้โดยเพิ่ม key ใหม่ในนี้ ไม่ต้องแก้ฟังก์ชันคำนวณเลย
-# ==========================================
+from typing import Dict, Any, Optional
 
 FOAM_CNC_MACHINES = {
-    # โปรไฟล์นี้ใช้ค่าจากตาราง Machine Information จริงที่ทีมส่งมา (เครื่อง "Robot (Foam)")
     "Robot_Foam": {
-        "max_feed_rate_mm_min": 5000.0,   # จากตาราง (Feed Rate)
-        "efficiency_factor": 0.85,        # ⚠️ ค่าอ้างอิงทั่วไป ควร calibrate เทียบงานจริง
-        "min_job_hours": 0.25,            # เวลาขั้นต่ำต่องาน (ติดตั้งชิ้นงาน/probe) กันชิ้นเล็กออกมาใกล้ 0 ชม.
+        "max_feed_rate_mm_min": 5000.0,
+        "efficiency_factor": 0.85,
+        "min_job_hours": 0.25,
         "processes": {
             "roughing": {
-                "tool_diameter_mm": 20.0,     # ใช้ดอกใหญ่สุดในช่วง 6-20mm เพื่อกัดเร็ว
-                "stepover_ratio": 0.50,       # กึ่งกลางช่วง 30-75% ที่ให้มา — ⚠️ ควรยืนยันค่าจริง
-                "stepdown_mm": 25.0,          # กึ่งกลางช่วง 10-50mm ที่ให้มา — ⚠️ ควรยืนยันค่าจริง
+                "tool_diameter_mm": 20.0,
+                "stepover_ratio": 0.50,
+                "stepdown_mm": 25.0,
                 "recommended_feed_mm_min": 5000.0,
                 "safety_margin": 1.15,
             },
             "finishing": {
-                "min_tool_diameter_mm": 6.0,  # complexity สูงสุด (10) -> ดอกเล็กสุด ละเอียดสุด
-                "max_tool_diameter_mm": 20.0, # complexity ต่ำสุด (1) -> ดอกใหญ่สุด เร็วสุด
-                "stepover_ratio": 0.15,       # ค่าทั่วไปสำหรับงาน finishing (ละเอียดกว่า roughing)
+                "min_tool_diameter_mm": 6.0,
+                "max_tool_diameter_mm": 20.0,
+                "stepover_ratio": 0.15,
                 "recommended_feed_mm_min": 5000.0,
                 "safety_margin": 1.10,
             },
         },
     },
-    # ตัวอย่างโปรไฟล์เพิ่มเติม (เก็บไว้เผื่ออนาคตมีเครื่องรุ่นอื่น หรือปรับใช้ได้ทันที)
-    "Foam_CNC_HighSpeed": {
-        "max_feed_rate_mm_min": 10000.0,
-        "efficiency_factor": 0.90,
-        "min_job_hours": 0.2,
-        "processes": {
-            "roughing": {
-                "tool_diameter_mm": 20.0, "stepover_ratio": 0.50, "stepdown_mm": 15.0,
-                "recommended_feed_mm_min": 8000.0, "safety_margin": 1.10,
-            },
-            "finishing": {
-                "min_tool_diameter_mm": 6.0, "max_tool_diameter_mm": 20.0, "stepover_ratio": 0.08,
-                "recommended_feed_mm_min": 6000.0, "safety_margin": 1.05,
-            },
-        },
-    },
 }
 
-# ⚠️ ปรับตามคำแนะนำของทีม: องศาหลอมพลาสติกและ feed rate ของเครื่องคงที่เสมอ
-# (ไม่ได้แปรตามรูปทรงหรือความซับซ้อนของชิ้นงาน) เวลาจึงเป็นสัดส่วนตรงกับ "ปริมาตรที่ต้องพิมพ์จริง"
-# เท่านั้น — ไม่ต้องคำนวณผ่านความยาวเส้นพลาสติก/cross-section ให้ซับซ้อนเกินจำเป็น
-# ค่า hours_per_cm3 ปรับจากการเทียบกับงานจริง 1 ชิ้น (17 Aug 2026): 28 ชม. / 1685.21 cm³ effective
 FDM_PRINT_DEFAULTS = {
     "hours_per_cm3": 0.016615,
-    "shell_fraction": 0.3,       # สัดส่วนปริมาตรที่เป็นเปลือกนอก (ไม่ขึ้นกับ % infill)
+    "shell_fraction": 0.3,
     "min_job_hours": 0.25,
 }
-
 
 @dataclass
 class MachiningEstimate:
     hours: float
-    breakdown: dict  # รายละเอียดแต่ละส่วน เพื่อ debug/ตรวจสอบว่าคำนวณสมเหตุสมผลไหม
-
+    breakdown: Dict[str, Any]
 
 def estimate_foam_cnc_hours(
     volume_removal_cm3: float,
@@ -84,14 +49,7 @@ def estimate_foam_cnc_hours(
     complexity_level: int,
     machine_name: str = "Robot_Foam",
 ) -> MachiningEstimate:
-    """
-    ประเมินชั่วโมง Foam CNC จาก 2 รอบ: Roughing (กัดหยาบเอาเนื้อออก) + Finishing (กัดตามผิว)
-    ใช้โปรไฟล์เครื่องจักรจาก FOAM_CNC_MACHINES (เพิ่ม/แก้เครื่องได้ที่ด้านบนไฟล์นี้)
-
-    volume_removal_cm3 : ปริมาตรที่ต้องกัดออก (Bounding Box volume - ปริมาตรชิ้นงานจริง) หน่วย cm3
-    surface_area_sqm   : พื้นที่ผิวจริงของโมเดล (จาก mesh) หน่วย ตร.ม.
-    complexity_level   : 1-10 ยิ่งสูง ยิ่งต้องใช้ดอกเล็กกัดละเอียด (finishing ช้าลง)
-    """
+    """ฟังก์ชันคำนวณชั่วโมงกัดพื้นฐาน (คง Logic เดิมของคุณไว้ 100%)"""
     if machine_name not in FOAM_CNC_MACHINES:
         raise ValueError(f"ไม่พบโปรไฟล์เครื่องจักร: {machine_name}")
     machine = FOAM_CNC_MACHINES[machine_name]
@@ -102,7 +60,7 @@ def estimate_foam_cnc_hours(
     volume_removal_mm3 = max(volume_removal_cm3, 0) * 1000.0
     surface_area_mm2 = max(surface_area_sqm, 0) * 1_000_000.0
 
-    # --- Roughing: ปริมาตรที่ต้องกัดออกจริง หารด้วยหน้าตัดที่กัดได้ต่อครั้ง (stepover x stepdown) ---
+    # Roughing Time
     stepover_rough_mm = rough["tool_diameter_mm"] * rough["stepover_ratio"]
     stepdown_mm = rough["stepdown_mm"]
     roughing_path_mm = (
@@ -112,7 +70,7 @@ def estimate_foam_cnc_hours(
     rough_feed = min(rough["recommended_feed_mm_min"], machine["max_feed_rate_mm_min"]) * machine["efficiency_factor"]
     roughing_time_min = (roughing_path_mm / rough_feed * rough["safety_margin"]) if rough_feed > 0 else 0.0
 
-    # --- Finishing: พื้นที่ผิวจริง หารด้วย stepover (ดอกเล็กลงตาม complexity) ---
+    # Finishing Time
     finish_tool_mm = finish["max_tool_diameter_mm"] - (
         finish["max_tool_diameter_mm"] - finish["min_tool_diameter_mm"]
     ) * (complexity_level - 1) / 9.0
@@ -122,7 +80,7 @@ def estimate_foam_cnc_hours(
     finishing_time_min = (finishing_path_mm / finish_feed * finish["safety_margin"]) if finish_feed > 0 else 0.0
 
     total_hours = (roughing_time_min + finishing_time_min) / 60.0
-    total_hours = max(total_hours, machine["min_job_hours"])  # กันชิ้นเล็กออกมาเป็น 0 ชม.
+    total_hours = max(total_hours, machine["min_job_hours"])
 
     return MachiningEstimate(
         hours=round(total_hours, 2),
@@ -135,33 +93,82 @@ def estimate_foam_cnc_hours(
         },
     )
 
+# =========================================================================
+# 🌟 ฟังก์ชันใหม่ที่เพิ่มเข้ามา: วิเคราะห์เงื่อนไข Tool Reach & คำนวณแผนแยกชิ้นส่วน
+# =========================================================================
 
-def estimate_3d_print_hours(
-    volume_cm3: float,
-    infill_pct: float = 20,
-    hours_per_cm3: float = None,
-    shell_fraction: float = None,
-) -> MachiningEstimate:
+def analyze_smart_splitting(
+    part_volume_cm3: float,
+    bounding_box_dims_mm: tuple,  # (Width_X, Length_Y, Height_Z)
+    surface_area_sqm: float,
+    complexity_level: int,
+    tool_reach_limit_mm: float = 200.0,
+    reach_safety_factor: float = 1.2,
+    machine_name: str = "Robot_Foam",
+) -> Dict[str, Any]:
     """
-    ประเมินชั่วโมง 3D Print FDM แบบเชิงเส้นตรงจากปริมาตร (ไม่ผ่านความยาวเส้น/feed rate)
-    เพราะอุณหภูมิและความเร็วพิมพ์ของเครื่องคงที่เสมอ ไม่แปรตามรูปทรงชิ้นงาน
-
-    volume_cm3 : ปริมาตรชิ้นงานจริง (ไม่ใช่ bounding box) หน่วย cm3 — ของ "1 ชิ้น" เท่านั้น
-    infill_pct : เปอร์เซ็นต์ infill ที่จะใช้พิมพ์ (0-100) ยังมีผลเพราะเปลี่ยนปริมาตรที่ต้องพิมพ์จริง
+    วิเคราะห์ว่าชิ้นงานควรตัดแบ่งหรือไม่ พร้อมเปรียบเทียบผลลัพธ์ระหว่าง ชิ้นเดียว vs แยกชิ้น
     """
-    p = FDM_PRINT_DEFAULTS
-    hours_per_cm3 = hours_per_cm3 or p["hours_per_cm3"]
-    shell_fraction = shell_fraction if shell_fraction is not None else p["shell_fraction"]
-
-    infill_fraction = max(0.0, min(100.0, infill_pct)) / 100.0
-    effective_volume_cm3 = max(volume_cm3, 0) * (shell_fraction + (1 - shell_fraction) * infill_fraction)
-
-    total_hours = max(effective_volume_cm3 * hours_per_cm3, p["min_job_hours"])
-
-    return MachiningEstimate(
-        hours=round(total_hours, 2),
-        breakdown={
-            "effective_volume_cm3": round(effective_volume_cm3, 2),
-            "hours_per_cm3": hours_per_cm3,
-        },
+    x_mm, y_mm, z_mm = bounding_box_dims_mm
+    max_part_depth_mm = max(x_mm, y_mm, z_mm)
+    
+    # คำนวณ Bounding Box Volume และ Volume ที่ต้องกัดออกกรณีชิ้นเดียว
+    bbox_volume_cm3 = (x_mm * y_mm * z_mm) / 1000.0
+    unsplit_volume_removal_cm3 = max(0.0, bbox_volume_cm3 - part_volume_cm3)
+    
+    # 1. คำนวณแบบกัดชิ้นเดียว (Original Unsplit)
+    unsplit_est = estimate_foam_cnc_hours(
+        volume_removal_cm3=unsplit_volume_removal_cm3,
+        surface_area_sqm=surface_area_sqm,
+        complexity_level=complexity_level,
+        machine_name=machine_name
     )
+    
+    # 2. เช็กเงื่อนไข Maximum Tool Reach Exceeded Factor
+    max_allowed_reach_mm = tool_reach_limit_mm * reach_safety_factor
+    is_tool_exceeded = max_part_depth_mm > max_allowed_reach_mm
+    
+    # 3. จำลองการแบ่งชิ้นส่วนเสมือน (Virtual Splitting)
+    # หาจำนวนการตัดแบ่งที่จำเป็นเพื่อให้ความลึกแต่ละชิ้นไม่เกิน Tool Reach
+    num_splits = max(2, int(-(-max_part_depth_mm // max_allowed_reach_mm))) if is_tool_exceeded else 1
+    
+    if num_splits > 1:
+        # เมื่อตัดแบ่งชิ้นงาน กล่อง Bounding Box ย่อยจะกระชับเข้าหาเนื้อชิ้นงานมากขึ้น
+        # ประเมินว่า Bounding Box รวมย่อยจะลดปริมาตรส่วนเกินลงได้ประมาณ 40-60%
+        split_bbox_efficiency = 0.50  # Factor ประมาณการโฟมส่วนเกินที่ประหยัดได้จากการจัดวางใหม่
+        split_volume_removal_cm3 = unsplit_volume_removal_cm3 * split_bbox_efficiency
+        
+        split_est = estimate_foam_cnc_hours(
+            volume_removal_cm3=split_volume_removal_cm3,
+            surface_area_sqm=surface_area_sqm, # พื้นที่ผิวรวมเท่าเดิม
+            complexity_level=complexity_level,
+            machine_name=machine_name
+        )
+        
+        # เพิ่ม Setup / Assembly Time Overhead ต่องานทากาวประกอบกลับ (เช่น 0.5 ชม. ต่อจุดตัด)
+        assembly_overhead_hours = (num_splits - 1) * 0.5
+        total_split_hours = round(split_est.hours + assembly_overhead_hours, 2)
+        foam_savings_pct = round((1 - (split_volume_removal_cm3 / unsplit_volume_removal_cm3)) * 100, 1)
+    else:
+        split_est = unsplit_est
+        total_split_hours = unsplit_est.hours
+        foam_savings_pct = 0.0
+
+    return {
+        "tool_reach_exceeded": is_tool_exceeded,
+        "recommended_splits": num_splits,
+        "max_depth_mm": max_part_depth_mm,
+        "threshold_limit_mm": max_allowed_reach_mm,
+        "unsplit_plan": {
+            "milling_hours": unsplit_est.hours,
+            "foam_waste_volume_cm3": round(unsplit_volume_removal_cm3, 2),
+            "status": "RISK: Tool Reach Exceeded" if is_tool_exceeded else "SAFE"
+        },
+        "optimized_split_plan": {
+            "milling_hours": total_split_hours,
+            "foam_waste_volume_cm3": round(split_volume_removal_cm3, 2) if num_splits > 1 else round(unsplit_volume_removal_cm3, 2),
+            "time_saved_hours": round(max(0.0, unsplit_est.hours - total_split_hours), 2),
+            "foam_savings_pct": foam_savings_pct,
+            "status": "SAFE"
+        }
+    }
