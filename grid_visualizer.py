@@ -15,37 +15,39 @@ def create_foam_grid_visualizer(
     """
     fig = go.Figure()
 
-    # 1. แสดงตัวโมเดล 3D งานจริง (สีน้ำเงิน) ครอบอยู่ภายใน Bounding Box
+    # 1. แสดงตัวโมเดล 3D งานจริง (สีน้ำเงิน) ซ้อนอยู่ภายใน Bounding Box
     if mesh is not None and hasattr(mesh, "vertices") and hasattr(mesh, "faces"):
-        vertices = np.asarray(mesh.vertices).copy()
-        faces = np.asarray(mesh.faces)
+        try:
+            vertices = np.asarray(mesh.vertices, dtype=float).copy()
+            faces = np.asarray(mesh.faces, dtype=int)
 
-        # ปรับตำแหน่ง Mesh ให้อยู่กึ่งกลางฐาน Bounding Box (0 -> x_mm, 0 -> y_mm, 0 -> z_mm)
-        min_bounds = vertices.min(axis=0)
-        max_bounds = vertices.max(axis=0)
-        mesh_dims = max_bounds - min_bounds
+            # จัดตำแหน่ง Mesh ให้อยู่กึ่งกลางฐาน Bounding Box (0 -> x_mm, 0 -> y_mm, 0 -> z_mm)
+            min_bounds = vertices.min(axis=0)
+            max_bounds = vertices.max(axis=0)
+            mesh_dims = max_bounds - min_bounds
 
-        # Alignment Offset
-        offset_x = (x_mm - mesh_dims[0]) / 2.0 - min_bounds[0]
-        offset_y = (y_mm - mesh_dims[1]) / 2.0 - min_bounds[1]
-        offset_z = -min_bounds[2]  # วางชิดฐาน Z=0
+            offset_x = (x_mm - mesh_dims[0]) / 2.0 - min_bounds[0]
+            offset_y = (y_mm - mesh_dims[1]) / 2.0 - min_bounds[1]
+            offset_z = -min_bounds[2]  # วางชิดฐาน Z=0
 
-        vertices[:, 0] += offset_x
-        vertices[:, 1] += offset_y
-        vertices[:, 2] += offset_z
+            vertices[:, 0] += offset_x
+            vertices[:, 1] += offset_y
+            vertices[:, 2] += offset_z
 
-        fig.add_trace(go.Mesh3d(
-            x=vertices[:, 0],
-            y=vertices[:, 1],
-            z=vertices[:, 2],
-            i=faces[:, 0],
-            j=faces[:, 1],
-            k=faces[:, 2],
-            color='#1565C0',
-            opacity=0.85,
-            name='3D Model',
-            hoverinfo='name'
-        ))
+            fig.add_trace(go.Mesh3d(
+                x=vertices[:, 0],
+                y=vertices[:, 1],
+                z=vertices[:, 2],
+                i=faces[:, 0],
+                j=faces[:, 1],
+                k=faces[:, 2],
+                color='#1565C0',
+                opacity=0.85,
+                name='3D Model',
+                hoverinfo='name'
+            ))
+        except Exception as e:
+            print(f"Error rendering mesh: {e}")
 
     # 2. วาดกรอบ Bounding Box รวมของชิ้นงาน (สีส้มใส)
     fig.add_trace(go.Mesh3d(
