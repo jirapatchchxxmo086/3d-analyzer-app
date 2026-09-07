@@ -137,13 +137,18 @@ def estimate_3d_print_hours(
             "hours_per_cm3": hours_per_cm3,
         },
     )
-    def estimate_3d_print_hours(volume_cm3, technology="FDM"):
+def estimate_3d_print_hours(volume_cm3, technology="FDM"):
     """
     คำนวณเวลาพิมพ์ 3D พิมพ์คร่าวๆ (ชั่วโมง)
     """
     if technology == "FDM":
-        return round(volume_cm3 * 0.15, 2)
+        hrs = round(volume_cm3 * 0.15, 2)
     elif technology == "SLA":
-        return round(volume_cm3 * 0.10, 2)
+        hrs = round(volume_cm3 * 0.10, 2)
     else:
-        return round(volume_cm3 * 0.12, 2)
+        hrs = round(volume_cm3 * 0.12, 2)
+
+    return MachiningEstimate(
+        hours=hrs,
+        breakdown={"effective_volume_cm3": volume_cm3, "technology": technology}
+    )
