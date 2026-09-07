@@ -2,11 +2,14 @@
 machining_estimator.py
 ========================
 โมดูลประเมินชั่วโมงเครื่องจักรอัตโนมัติ + ระบบวิเคราะห์การตัดแบ่งชิ้นส่วนเสมือน (Virtual Splitting)
-เพื่อรองรับโจทย์ Tool Reach Limit และการคำนวณเปรียบเทียบการประหยัดเวลา/เนื้อโฟม
 """
 
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
+
+# ==========================================
+# 1. โปรไฟล์เครื่องจักร Foam CNC
+# ==========================================
 
 FOAM_CNC_MACHINES = {
     "Robot_Foam": {
@@ -30,6 +33,21 @@ FOAM_CNC_MACHINES = {
             },
         },
     },
+    "Foam_CNC_HighSpeed": {
+        "max_feed_rate_mm_min": 10000.0,
+        "efficiency_factor": 0.90,
+        "min_job_hours": 0.2,
+        "processes": {
+            "roughing": {
+                "tool_diameter_mm": 20.0, "stepover_ratio": 0.50, "stepdown_mm": 15.0,
+                "recommended_feed_mm_min": 8000.0, "safety_margin": 1.10,
+            },
+            "finishing": {
+                "min_tool_diameter_mm": 6.0, "max_tool_diameter_mm": 20.0, "stepover_ratio": 0.08,
+                "recommended_feed_mm_min": 6000.0, "safety_margin": 1.05,
+            },
+        },
+    },
 }
 
 FDM_PRINT_DEFAULTS = {
@@ -43,15 +61,20 @@ class MachiningEstimate:
     hours: float
     breakdown: Dict[str, Any]
 
+# ==========================================
+# 2. ฟังก์ชันคำนวณหลัก
+# ==========================================
+
 def estimate_foam_cnc_hours(
     volume_removal_cm3: float,
     surface_area_sqm: float,
     complexity_level: int,
     machine_name: str = "Robot_Foam",
 ) -> MachiningEstimate:
-    """ฟังก์ชันคำนวณชั่วโมงกัดพื้นฐาน (คง Logic เดิมของคุณไว้ 100%)"""
+    """ประเมินชั่วโมง Foam CNC"""
     if machine_name not in FOAM_CNC_MACHINES:
-        raise ValueError(f"ไม่พบโปรไฟล์เครื่องจักร: {machine_name}")
+        machine_name = "Robot_Foam" # Fallback ป้องกัน Error
+    
     machine = FOAM_CNC_MACHINES[machine_name]
     rough = machine["processes"]["roughing"]
     finish = machine["processes"]["finishing"]
@@ -93,30 +116,48 @@ def estimate_foam_cnc_hours(
         },
     )
 
-# =========================================================================
-# 🌟 ฟังก์ชันใหม่ที่เพิ่มเข้ามา: วิเคราะห์เงื่อนไข Tool Reach & คำนวณแผนแยกชิ้นส่วน
-# =========================================================================
+
+def estimate_3d_print_hours(
+    volume_cm3: float,
+    infill_pct: float = 20,
+    hours_per_cm3: Optional[float] = None,
+    shell_fraction: Optional[float] = None,
+) -> MachiningEstimate:
+    """ประเมินชั่วโมง 3D Print FDM"""
+    p = FDM_PRINT_DEFAULTS
+    hours_per_cm3 = hours_per_cm3 or p["hours_per_cm3"]
+    shell_fraction = shell_fraction if shell_fraction is not None else p["shell_fraction"]
+
+    infill_fraction = max(0.0, min(100.0, infill_pct)) / 100.0
+    effective_volume_cm3 = max(volume_cm3, 0) * (shell_fraction + (1 - shell_fraction) * infill_fraction)
+
+    total_hours = max(effective_volume_cm3 * hours_per_cm3, p["min_job_hours"])
+
+    return MachiningEstimate(
+        hours=round(total_hours, 2),
+        breakdown={
+            "effective_volume_cm3": round(effective_volume_cm3, 2),
+            "hours_per_cm3": hours_per_cm3,
+        },
+    )
+
 
 def analyze_smart_splitting(
     part_volume_cm3: float,
-    bounding_box_dims_mm: tuple,  # (Width_X, Length_Y, Height_Z)
+    bounding_box_dims_mm: tuple,
     surface_area_sqm: float,
     complexity_level: int,
     tool_reach_limit_mm: float = 200.0,
     reach_safety_factor: float = 1.2,
     machine_name: str = "Robot_Foam",
 ) -> Dict[str, Any]:
-    """
-    วิเคราะห์ว่าชิ้นงานควรตัดแบ่งหรือไม่ พร้อมเปรียบเทียบผลลัพธ์ระหว่าง ชิ้นเดียว vs แยกชิ้น
-    """
+    """วิเคราะห์และประเมินผลการตัดแบ่งชิ้นส่วนเสมือน"""
     x_mm, y_mm, z_mm = bounding_box_dims_mm
     max_part_depth_mm = max(x_mm, y_mm, z_mm)
     
-    # คำนวณ Bounding Box Volume และ Volume ที่ต้องกัดออกกรณีชิ้นเดียว
     bbox_volume_cm3 = (x_mm * y_mm * z_mm) / 1000.0
     unsplit_volume_removal_cm3 = max(0.0, bbox_volume_cm3 - part_volume_cm3)
     
-    # 1. คำนวณแบบกัดชิ้นเดียว (Original Unsplit)
     unsplit_est = estimate_foam_cnc_hours(
         volume_removal_cm3=unsplit_volume_removal_cm3,
         surface_area_sqm=surface_area_sqm,
@@ -124,31 +165,24 @@ def analyze_smart_splitting(
         machine_name=machine_name
     )
     
-    # 2. เช็กเงื่อนไข Maximum Tool Reach Exceeded Factor
     max_allowed_reach_mm = tool_reach_limit_mm * reach_safety_factor
     is_tool_exceeded = max_part_depth_mm > max_allowed_reach_mm
-    
-    # 3. จำลองการแบ่งชิ้นส่วนเสมือน (Virtual Splitting)
-    # หาจำนวนการตัดแบ่งที่จำเป็นเพื่อให้ความลึกแต่ละชิ้นไม่เกิน Tool Reach
     num_splits = max(2, int(-(-max_part_depth_mm // max_allowed_reach_mm))) if is_tool_exceeded else 1
     
     if num_splits > 1:
-        # เมื่อตัดแบ่งชิ้นงาน กล่อง Bounding Box ย่อยจะกระชับเข้าหาเนื้อชิ้นงานมากขึ้น
-        # ประเมินว่า Bounding Box รวมย่อยจะลดปริมาตรส่วนเกินลงได้ประมาณ 40-60%
-        split_bbox_efficiency = 0.50  # Factor ประมาณการโฟมส่วนเกินที่ประหยัดได้จากการจัดวางใหม่
+        split_bbox_efficiency = 0.50
         split_volume_removal_cm3 = unsplit_volume_removal_cm3 * split_bbox_efficiency
         
         split_est = estimate_foam_cnc_hours(
             volume_removal_cm3=split_volume_removal_cm3,
-            surface_area_sqm=surface_area_sqm, # พื้นที่ผิวรวมเท่าเดิม
+            surface_area_sqm=surface_area_sqm,
             complexity_level=complexity_level,
             machine_name=machine_name
         )
         
-        # เพิ่ม Setup / Assembly Time Overhead ต่องานทากาวประกอบกลับ (เช่น 0.5 ชม. ต่อจุดตัด)
         assembly_overhead_hours = (num_splits - 1) * 0.5
         total_split_hours = round(split_est.hours + assembly_overhead_hours, 2)
-        foam_savings_pct = round((1 - (split_volume_removal_cm3 / unsplit_volume_removal_cm3)) * 100, 1)
+        foam_savings_pct = round((1 - (split_volume_removal_cm3 / (unsplit_volume_removal_cm3 or 1))) * 100, 1)
     else:
         split_est = unsplit_est
         total_split_hours = unsplit_est.hours
@@ -166,7 +200,7 @@ def analyze_smart_splitting(
         },
         "optimized_split_plan": {
             "milling_hours": total_split_hours,
-            "foam_waste_volume_cm3": round(split_volume_removal_cm3, 2) if num_splits > 1 else round(unsplit_volume_removal_cm3, 2),
+            "foam_waste_volume_cm3": round(split_volume_removal_cm3 if num_splits > 1 else unsplit_volume_removal_cm3, 2),
             "time_saved_hours": round(max(0.0, unsplit_est.hours - total_split_hours), 2),
             "foam_savings_pct": foam_savings_pct,
             "status": "SAFE"
