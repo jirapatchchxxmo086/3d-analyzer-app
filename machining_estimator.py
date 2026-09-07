@@ -1,15 +1,11 @@
 """
 machining_estimator.py
 ========================
-โมดูลประเมินชั่วโมงเครื่องจักรอัตโนมัติ + ระบบวิเคราะห์การตัดแบ่งชิ้นส่วนเสมือน (Virtual Splitting)
+โมดูลประเมินชั่วโมงเครื่องจักรอัตโนมัติ + ระบบแยกชิ้นกัดสำหรับงานขนาดใหญ่ (> 1 เมตร)
 """
 
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
-
-# ==========================================
-# 1. โปรไฟล์เครื่องจักร Foam CNC
-# ==========================================
 
 FOAM_CNC_MACHINES = {
     "Robot_Foam": {
@@ -33,21 +29,6 @@ FOAM_CNC_MACHINES = {
             },
         },
     },
-    "Foam_CNC_HighSpeed": {
-        "max_feed_rate_mm_min": 10000.0,
-        "efficiency_factor": 0.90,
-        "min_job_hours": 0.2,
-        "processes": {
-            "roughing": {
-                "tool_diameter_mm": 20.0, "stepover_ratio": 0.50, "stepdown_mm": 15.0,
-                "recommended_feed_mm_min": 8000.0, "safety_margin": 1.10,
-            },
-            "finishing": {
-                "min_tool_diameter_mm": 6.0, "max_tool_diameter_mm": 20.0, "stepover_ratio": 0.08,
-                "recommended_feed_mm_min": 6000.0, "safety_margin": 1.05,
-            },
-        },
-    },
 }
 
 FDM_PRINT_DEFAULTS = {
@@ -61,10 +42,6 @@ class MachiningEstimate:
     hours: float
     breakdown: Dict[str, Any]
 
-# ==========================================
-# 2. ฟังก์ชันคำนวณหลัก
-# ==========================================
-
 def estimate_foam_cnc_hours(
     volume_removal_cm3: float,
     surface_area_sqm: float,
@@ -73,7 +50,7 @@ def estimate_foam_cnc_hours(
 ) -> MachiningEstimate:
     """ประเมินชั่วโมง Foam CNC"""
     if machine_name not in FOAM_CNC_MACHINES:
-        machine_name = "Robot_Foam" # Fallback ป้องกัน Error
+        machine_name = "Robot_Foam"
     
     machine = FOAM_CNC_MACHINES[machine_name]
     rough = machine["processes"]["roughing"]
@@ -116,7 +93,6 @@ def estimate_foam_cnc_hours(
         },
     )
 
-
 def estimate_3d_print_hours(
     volume_cm3: float,
     infill_pct: float = 20,
@@ -141,68 +117,80 @@ def estimate_3d_print_hours(
         },
     )
 
+# ==========================================
+# 🌟 ระบบคำนวณการตัดแบ่งชิ้นงานเกิน 1 เมตร
+# ==========================================
 
-def analyze_smart_splitting(
+def calculate_split_milling_plan(
     part_volume_cm3: float,
-    bounding_box_dims_mm: tuple,
+    bounding_box_dims_mm: tuple,  # (X_mm, Y_mm, Z_mm)
     surface_area_sqm: float,
     complexity_level: int,
-    tool_reach_limit_mm: float = 200.0,
-    reach_safety_factor: float = 1.2,
+    max_segment_size_mm: float = 1000.0,  # เกณฑ์ตัดแบ่งหากเกิน 1 เมตร (1,000 mm)
+    split_type: str = "planar",            # 'planar' (ตัดตามระนาบ) หรือ 'joint' (ตัดตามข้อต่อ/สัดส่วน)
     machine_name: str = "Robot_Foam",
 ) -> Dict[str, Any]:
-    """วิเคราะห์และประเมินผลการตัดแบ่งชิ้นส่วนเสมือน"""
+    """
+    คำนวณการกัดแบบแยกชิ้นส่วนเมื่อขนาดชิ้นงานเกิน 1 เมตร เพื่อลดปริมาตรสกัดโฟมทิ้ง
+    """
     x_mm, y_mm, z_mm = bounding_box_dims_mm
-    max_part_depth_mm = max(x_mm, y_mm, z_mm)
     
-    bbox_volume_cm3 = (x_mm * y_mm * z_mm) / 1000.0
-    unsplit_volume_removal_cm3 = max(0.0, bbox_volume_cm3 - part_volume_cm3)
+    # จำนวนชิ้นที่ต้องตัดแบ่งในแต่ละแกน (X, Y, Z)
+    splits_x = max(1, int(-(-x_mm // max_segment_size_mm)))
+    splits_y = max(1, int(-(-y_mm // max_segment_size_mm)))
+    splits_z = max(1, int(-(-z_mm // max_segment_size_mm)))
     
+    total_segments = splits_x * splits_y * splits_z
+    
+    # ปริมาตร Bounding Box รวมแบบชิ้นเดียว
+    single_bbox_vol_cm3 = (x_mm * y_mm * z_mm) / 1000.0
+    single_volume_removal_cm3 = max(0.0, single_bbox_vol_cm3 - part_volume_cm3)
+    
+    # คำนวณแบบกัดชิ้นเดียว (Unsplit)
     unsplit_est = estimate_foam_cnc_hours(
-        volume_removal_cm3=unsplit_volume_removal_cm3,
+        volume_removal_cm3=single_volume_removal_cm3,
         surface_area_sqm=surface_area_sqm,
         complexity_level=complexity_level,
         machine_name=machine_name
     )
     
-    max_allowed_reach_mm = tool_reach_limit_mm * reach_safety_factor
-    is_tool_exceeded = max_part_depth_mm > max_allowed_reach_mm
-    num_splits = max(2, int(-(-max_part_depth_mm // max_allowed_reach_mm))) if is_tool_exceeded else 1
-    
-    if num_splits > 1:
-        split_bbox_efficiency = 0.50
-        split_volume_removal_cm3 = unsplit_volume_removal_cm3 * split_bbox_efficiency
+    if total_segments > 1:
+        # กำหนด Efficiency Factor ของการแนบเนื้อโฟมตามประเภทการตัด
+        # Joint-based (ตัดตามข้อต่อ/แขนขา): กล่องโฟมจะกระชับแนบชิ้นงานได้มากกว่า Planar (ตัดตามแกนตรง)
+        efficiency_factor = 0.15 if split_type == "joint" else 0.25 
+        
+        # ปริมาตรโฟมส่วนเกินที่ต้องกัดออกจริงเมื่อหั่นแยกชิ้นแล้ว
+        split_volume_removal_cm3 = single_volume_removal_cm3 * efficiency_factor
         
         split_est = estimate_foam_cnc_hours(
             volume_removal_cm3=split_volume_removal_cm3,
-            surface_area_sqm=surface_area_sqm,
+            surface_area_sqm=surface_area_sqm,  # พื้นที่ผิวรวมของโมเดลเท่าเดิม
             complexity_level=complexity_level,
             machine_name=machine_name
         )
         
-        assembly_overhead_hours = (num_splits - 1) * 0.5
-        total_split_hours = round(split_est.hours + assembly_overhead_hours, 2)
-        foam_savings_pct = round((1 - (split_volume_removal_cm3 / (unsplit_volume_removal_cm3 or 1))) * 100, 1)
+        # เพิ่มเวลาประกอบ/ทากาว t-overhead ต่องาน (0.3 ชม. ต่อชิ้นย่อย)
+        assembly_overhead = (total_segments - 1) * 0.3
+        total_split_hours = round(split_est.hours + assembly_overhead, 2)
+        foam_savings_pct = round((1 - (split_volume_removal_cm3 / (single_volume_removal_cm3 or 1))) * 100, 1)
     else:
         split_est = unsplit_est
         total_split_hours = unsplit_est.hours
+        split_volume_removal_cm3 = single_volume_removal_cm3
         foam_savings_pct = 0.0
 
     return {
-        "tool_reach_exceeded": is_tool_exceeded,
-        "recommended_splits": num_splits,
-        "max_depth_mm": max_part_depth_mm,
-        "threshold_limit_mm": max_allowed_reach_mm,
-        "unsplit_plan": {
-            "milling_hours": unsplit_est.hours,
-            "foam_waste_volume_cm3": round(unsplit_volume_removal_cm3, 2),
-            "status": "RISK: Tool Reach Exceeded" if is_tool_exceeded else "SAFE"
-        },
-        "optimized_split_plan": {
-            "milling_hours": total_split_hours,
-            "foam_waste_volume_cm3": round(split_volume_removal_cm3 if num_splits > 1 else unsplit_volume_removal_cm3, 2),
-            "time_saved_hours": round(max(0.0, unsplit_est.hours - total_split_hours), 2),
-            "foam_savings_pct": foam_savings_pct,
-            "status": "SAFE"
+        "is_split_required": total_segments > 1,
+        "total_segments": total_segments,
+        "split_grid": f"{splits_x} x {splits_y} x {splits_z} ชิ้น",
+        "split_type": "ตัดตามข้อต่อ/สัดส่วน (Joint-based)" if split_type == "joint" else "ตัดตามระนาบ (Planar)",
+        "unsplit_roughing_hours": unsplit_est.breakdown["roughing_hours"],
+        "optimized_roughing_hours": split_est.breakdown["roughing_hours"],
+        "optimized_total_hours": total_split_hours,
+        "foam_waste_reduction_pct": foam_savings_pct,
+        "summary": {
+            "single_piece_hours": unsplit_est.hours,
+            "smart_split_hours": total_split_hours,
+            "time_saved_hours": round(max(0.0, unsplit_est.hours - total_split_hours), 2)
         }
     }
