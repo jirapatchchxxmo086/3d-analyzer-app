@@ -1105,7 +1105,6 @@ elif page == t["page_2_name"]:
                 max_segment_mm=max_seg_m * 1000.0,
                 wall_thickness_mm=wall_thick
             )
-
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
             st.markdown("---")
             st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
