@@ -9,6 +9,7 @@ from string import Template
 import streamlit.components.v1 as components
 import auth
 from grid_visualizer import create_foam_grid_visualizer
+
 auth.require_login()
 
 # ==========================================
@@ -128,52 +129,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-# ==========================================
-# 🧮 Precision Kinematics Calculation Helper
-# ==========================================
-def calculate_precision_machining_estimation(
-    mesh,
-    feed_rate_xy=5000.0,   # mm/min
-    stepover_rough=15.0,    # mm
-    stepdown_rough=10.0,    # mm
-    stepover_finish=3.0,    # mm
-    rapid_factor=1.15
-):
-    """
-    คำนวณประเมินเวลาเครื่องจักรและปริมาตรวัสดุแบบ Precision โดยอิงจาก Kinematics & MRR
-    โดยไม่ต้องสร้างไฟล์ 3D Cut จริง
-    """
-    if mesh is None:
-        return {"roughing_hours": 0.0, "finishing_hours": 0.0, "total_hours": 0.0, "raw_foam_m3": 0.0, "glue_g": 0.0}
-
-    # 1. Bounding Box & Raw Material Analysis
-    obb = mesh.bounding_box_oriented
-    raw_foam_volume_mm3 = obb.volume
-    raw_foam_m3 = raw_foam_volume_mm3 / 1e9
-
-    # 2. Material Removal Rate (MRR) - Roughing
-    exact_volume_mm3 = mesh.volume if getattr(mesh, 'is_watertight', False) else mesh.convex_hull.volume
-    waste_volume_mm3 = max(raw_foam_volume_mm3 - exact_volume_mm3, 0.0)
-    
-    mrr_mm3_per_min = feed_rate_xy * stepover_rough * stepdown_rough
-    roughing_time_min = waste_volume_mm3 / mrr_mm3_per_min if mrr_mm3_per_min > 0 else 0.0
-
-    # 3. Surface Toolpath Analysis - Finishing
-    total_surface_area_mm2 = mesh.area
-    finishing_toolpath_length_mm = total_surface_area_mm2 / stepover_finish if stepover_finish > 0 else 0.0
-    finishing_time_min = finishing_toolpath_length_mm / feed_rate_xy if feed_rate_xy > 0 else 0.0
-
-    # 4. Total Machining Hours
-    roughing_hours = (roughing_time_min * rapid_factor) / 60.0
-    finishing_hours = (finishing_time_min * rapid_factor) / 60.0
-
-    return {
-        "roughing_hours": round(roughing_hours, 2),
-        "finishing_hours": round(finishing_hours, 2),
-        "total_hours": round(roughing_hours + finishing_hours, 2),
-        "raw_foam_m3": round(raw_foam_m3, 4),
-    }
 
 # ==========================================
 # 🌐 2. Language Translations Dictionary
@@ -396,6 +351,8 @@ if "selected_finishes" not in st.session_state:
     st.session_state["selected_finishes"] = []
 if "mesh" not in st.session_state:
     st.session_state["mesh"] = None
+if "submesh_count" not in st.session_state:
+    st.session_state["submesh_count"] = 1
 
 # ==========================================
 # 🧭 4. Sidebar Navigation & Language Selector
@@ -444,6 +401,7 @@ if page == t["page_1_name"]:
     scale_to_m = 0.001
 
     def process_and_clean_mesh(loaded_data):
+        sub_count = 1
         if isinstance(loaded_data, trimesh.Scene):
             geometries = []
             for node_name in loaded_data.graph.nodes_geometry:
@@ -452,6 +410,7 @@ if page == t["page_1_name"]:
                 geom.apply_transform(transform)
                 geometries.append(geom)
 
+            sub_count = len(geometries) if geometries else 1
             if geometries:
                 mesh = trimesh.util.concatenate(geometries)
             else:
@@ -473,7 +432,7 @@ if page == t["page_1_name"]:
             except Exception:
                 pass
 
-        return mesh
+        return mesh, sub_count
 
     def analyze_surface_complexity(mesh, scale_to_m, is_point_cloud):
         if is_point_cloud or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
@@ -707,7 +666,8 @@ if page == t["page_1_name"]:
         try:
             with st.spinner("Processing 3D model file..."):
                 loaded_data = trimesh.load(tmp_path)
-                mesh = process_and_clean_mesh(loaded_data)
+                mesh, submesh_cnt = process_and_clean_mesh(loaded_data)
+                st.session_state["submesh_count"] = submesh_cnt
 
                 is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
@@ -817,7 +777,7 @@ if page == t["page_1_name"]:
 
             st.markdown(f"""
             <div style="background:#FFFFFF; border:1px solid #E8D5BE; border-radius:12px;
-                        padding:14px 18px; display:flex; align-items:center; justify-space-between;
+                        padding:14px 18px; display:flex; align-items:center; justify-content:space-between;
                         margin-bottom:1.2rem;">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <div style="width:38px; height:38px; border-radius:8px; background:#F3E7D8;
@@ -917,7 +877,7 @@ elif page == t["page_2_name"]:
         load_color_finish_db,
         COAT_PROCESS_SHEET_NAME,
     )
-    from machining_estimator import estimate_3d_print_hours
+    from machining_estimator import estimate_foam_cnc_hours, estimate_3d_print_hours
 
     MATERIAL_MASTER_DB = load_material_master_db()
     LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
@@ -968,6 +928,8 @@ elif page == t["page_2_name"]:
     bbox_w_mm = float(st.session_state.get("width_x_mm", 0.0))
     bbox_l_mm = float(st.session_state.get("length_y_mm", 0.0))
     bbox_h_mm = float(st.session_state.get("height_z_mm", 0.0))
+    bbox_volume_cm3 = (bbox_w_mm * bbox_l_mm * bbox_h_mm) / 1000.0
+    per_piece_removal_cm3 = max(bbox_volume_cm3 - per_piece_volume_cm3, 0.0)
 
     with col_in2:
         calc_area = st.number_input(
@@ -998,24 +960,27 @@ elif page == t["page_2_name"]:
 
         with o_col3:
             if op_unit == "Baht/Hr.":
-                if selected_machine in ["Robot", "CNC Router", "Robot / Router"]:
-                    # เรียกใช้อัลกอริทึม Precision Estimation
-                    precision_res = calculate_precision_machining_estimation(
-                        mesh=st.session_state.get("mesh")
+                if selected_machine == "Robot":
+                    machining_result = estimate_foam_cnc_hours(
+                        volume_removal_cm3=per_piece_removal_cm3,
+                        surface_area_sqm=per_piece_area,
+                        complexity_level=complexity_level,
                     )
-                    suggested_rough = precision_res["roughing_hours"]
-                    suggested_finish = precision_res["finishing_hours"]
-                    
-                    st.caption("⚡ คำนวณด้วย Precision Kinematics Algorithm")
+                    suggested_rough = machining_result.breakdown["roughing_hours"]
+                    suggested_finish = machining_result.breakdown["finishing_hours"]
+                    st.caption(
+                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น "
+                        f"(ดอก finishing {machining_result.breakdown['finish_tool_mm_used']} มม.)"
+                    )
                     op_qty_rough = st.number_input(
                         "ชั่วโมงกัดหยาบ (Roughing)" if lang == "TH" else "Roughing hours",
                         min_value=0.0, value=float(suggested_rough), step=0.25,
-                        key=f"op_qty_rough_{round(float(suggested_rough), 4)}"
+                        key=f"op_qty_rough_{selected_machine}_{complexity_level}"
                     )
                     op_qty_finish = st.number_input(
-                        "ชั่วโมงกัดรายละเอียด (Finishing)" if lang == "TH" else "Finishing hours",
+                        "ชั่วโมงกัดละเอียด (Finishing)" if lang == "TH" else "Finishing hours",
                         min_value=0.0, value=float(suggested_finish), step=0.25,
-                        key=f"op_qty_finish_{round(float(suggested_finish), 4)}"
+                        key=f"op_qty_finish_{selected_machine}_{complexity_level}"
                     )
                     op_qty = None
                 elif selected_machine == "3D Print FDM":
@@ -1028,13 +993,13 @@ elif page == t["page_2_name"]:
                     )
                     op_qty = st.number_input(
                         t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
-                        key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
+                        key=f"op_qty_{selected_machine}"
                     )
                 else:
                     suggested_qty = 1.0
                     op_qty = st.number_input(
                         t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
-                        key=f"op_qty_{selected_machine}_{round(float(suggested_qty), 4)}"
+                        key=f"op_qty_{selected_machine}"
                     )
             else:
                 op_qty = st.number_input(
@@ -1046,7 +1011,7 @@ elif page == t["page_2_name"]:
             st.write(" ")
             st.write(" ")
             if st.button(t["op_add_btn"], use_container_width=True, key="add_op_btn"):
-                if selected_machine in ["Robot", "CNC Router", "Robot / Router"] and op_unit == "Baht/Hr.":
+                if selected_machine == "Robot" and op_unit == "Baht/Hr.":
                     rough_label = f"{selected_machine} (กัดหยาบ)" if lang == "TH" else f"{selected_machine} (Roughing)"
                     finish_label = f"{selected_machine} (กัดละเอียด)" if lang == "TH" else f"{selected_machine} (Finishing)"
                     new_ops = [
@@ -1060,7 +1025,7 @@ elif page == t["page_2_name"]:
                         },
                     ]
                     st.session_state["selected_operations"].extend(new_ops)
-                    st.toast(f"Added {selected_machine} Roughing {op_qty_rough} + Finishing {op_qty_finish} {op_unit}")
+                    st.toast(f"Added Robot Roughing {op_qty_rough} + Finishing {op_qty_finish} {op_unit}")
                 else:
                     new_op = {
                         "machine": selected_machine,
@@ -1088,7 +1053,7 @@ elif page == t["page_2_name"]:
                 st.rerun()
 
     # ----------------------------------------------------------------------
-    # 🧩 Foam Cutting Strategy Comparison & Visualizer
+    # 🧩 Plotly Foam Slicing Visualizer
     # ----------------------------------------------------------------------
     x_mm = st.session_state.get("width_x_mm", 0.0)
     y_mm = st.session_state.get("length_y_mm", 0.0)
@@ -1096,73 +1061,70 @@ elif page == t["page_2_name"]:
 
     if x_mm > 0 and y_mm > 0 and z_mm > 0:
         st.markdown("---")
-        st.markdown("### 🧩 เปรียบเทียบกลยุทธ์การตัดกัดโฟม (Foam Cutting Strategy Comparison)")
-        st.caption("ประเมินการใช้วัสดุโฟมดิบและเปรียบเทียบระหว่างการกัดแบบระนาบ (Planar Split) และการกัดแยกชิ้นตามข้อต่อ (Modular Joint Split)")
+        with st.expander("🧩 ภาพจำลองผังการตัดแบ่งบล็อกโฟม (Foam Slicing Visualizer)", expanded=True):
+            col_v1, col_v2 = st.columns(2)
+            with col_v1:
+                max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 0.5, 2.0, 1.0, 0.1, key="p2_max_seg")
+            with col_v2:
+                wall_thick = st.slider("ความหนาเปลือกโฟม Hollow Shell (มม.)", 30, 150, 75, 5, key="p2_wall_thick")
 
-        current_mesh = st.session_state.get("mesh")
+            current_mesh = st.session_state.get("mesh")
 
-        # --- คำนวณปริมาตรการใช้วัสดุของทั้ง 2 รูปแบบ ---
-        # 1. การกัดแบบระนาบ (Planar Split): ใช้ Bounding Box รวมตรงๆ + Margin Safety
-        planar_vol_m3 = (x_mm * y_mm * z_mm * 1.05) / 1e9
+            fig_grid = create_foam_grid_visualizer(
+                x_mm=x_mm,
+                y_mm=y_mm,
+                z_mm=z_mm,
+                max_segment_mm=max_seg_m * 1000.0,
+                wall_thickness_mm=wall_thick,
+                mesh=current_mesh
+            )
+            st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
 
-        # 2. การกัดแบบแยกชิ้นตามข้อต่อ (Modular Joint Split): 
-        # ประเมินจากปริมาตรเนื้อโฟมส่วนปิดล้อมจริง (Convex Hull / Exact Volume) + Allowance การประกอบ 20%
-        if current_mesh is not None:
-            mesh_vol = current_mesh.volume if getattr(current_mesh, 'is_watertight', False) else current_mesh.convex_hull.volume
-            modular_vol_m3 = (mesh_vol * 1.20) / 1e9
-        else:
-            modular_vol_m3 = planar_vol_m3 * 0.70  # ค่าประมาณการณ์เริ่มต้นหากไม่มี Mesh
+        st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
-        # คำนวณเปอร์เซ็นต์ความประหยัด
-        savings_percent = max(0.0, ((planar_vol_m3 - modular_vol_m3) / planar_vol_m3) * 100) if planar_vol_m3 > 0 else 0.0
+        submesh_count = st.session_state.get("submesh_count", 1)
+        col_rec1, col_rec2 = st.columns([2, 1])
 
-        # Card แสดงผลเปรียบเทียบ
-        c_m1, c_m2, c_m3 = st.columns(3)
-        c_m1.metric("📦 กัดแบบระนาบ (Planar)", f"{planar_vol_m3:.3f} m³", "บล็อกสี่เหลี่ยมเต็ม")
-        c_m2.metric("✂️ กัดแยกชิ้นตามข้อต่อ (Modular)", f"{modular_vol_m3:.3f} m³", f"-{savings_percent:.1f}% เนื้อโฟม")
-        c_m3.metric("💡 สรุปผลลัพธ์", "แยกชิ้นประหยัดกว่า" if savings_percent > 5 else "ระนาบคุ้มค่ากว่า", f"ประหยัดได้ ~{savings_percent:.1f}%")
+        aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
+        is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
 
-        # --- ส่วนจำลอง visualizer ทั้ง 2 แบบ ---
-        st.markdown("#### 🖥️ จำลองการจัดวางและผังการตัดโฟมทั้ง 2 แบบ")
-        tab_planar, tab_modular = st.tabs(["📐 1. การกัดแบบระนาบ (Planar Split)", "✂️ 2. การกัดแยกชิ้นตามข้อต่อ (Modular Joint Split)"])
-
-        with tab_planar:
-            col_vp1, col_vp2 = st.columns([2, 1])
-            with col_vp1:
-                max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 0.5, 2.0, 1.0, 0.1, key="planar_max_seg")
-                fig_planar = create_foam_grid_visualizer(
-                    x_mm=x_mm, y_mm=y_mm, z_mm=z_mm,
-                    max_segment_mm=max_seg_m * 1000.0,
-                    wall_thickness_mm=75,
-                    mesh=current_mesh
-                )
-                st.plotly_chart(fig_planar, use_container_width=True, key="planar_chart")
-            with col_vp2:
-                st.info("**คำแนะนำสำหรับการกัดแบบระนาบ:**")
+        with col_rec1:
+            if submesh_count > 1:
+                st.success(f"🧩 **ตรวจพบโมเดลแยกชิ้นส่วนแล้ว ({submesh_count} ชิ้นส่วน)**")
                 st.write("""
-                * **กระบวนการ:** แบ่งบล็อกโฟมเป็นทรงสี่เหลี่ยมตามระดับชั้นความสูงหรือความกว้าง
-                * **จุดเด่น:** ตั้งค่าเครื่องง่าย เลื่อยโฟมดิบได้รวดเร็ว เหมาะกับงานโครงสร้างหลักหรืองานที่ไม่ซับซ้อนมาก
-                * **ข้อเสีย:** เสียเศษโฟมส่วนเกินจากการกัด Air-Cutting รอบตัวโมเดลค่อนข้างมาก
+                * **กลยุทธ์:** นำแต่ละชิ้นส่วน (เช่น แขน, ขา, ลำตัว) เข้ากระบวนการจัดวางบนเตียงกัดแยกกัน
+                * **ข้อดี:** ไม่ต้องผ่าไฟล์ใหม่ ประหยัดเนื้อโฟมได้สูงสุด และสามารถรันกัดพร้อมกันหลายเครื่องได้ทันที
                 """)
+            else:
+                if is_flat:
+                    st.info("🎯 **แนะนำ: ตัดแบ่ง 2 ซีกหน้า-หลัง (2-Plane Split / Half-Split)**")
+                    st.write("""
+                    * **วิธีจัดวาง:** ผ่าครึ่งโมเดลตามแนวราบ วางโฟมราบกับเตียงกัด (เหมาะกับงานนูนหรือครึ่งองค์)
+                    * **ข้อดี:** ล็อกชิ้นงานง่าย กัดเรียบเนียน ประหยัดเวลา ไม่ต้องใช้เครื่องกัดหลายแกนซับซ้อน
+                    """)
+                elif aspect_ratio > 2.2:
+                    st.warning("✂️ **แนะนำ: ถอดแยกชิ้นส่วนตามข้อต่อ (Modular Joint Split)**")
+                    st.write("""
+                    * **วิธีจัดวาง:** ใช้ Plane Slice แบ่งโฟมตามสัดส่วนองค์ประกอบ (เช่น หัว, ลำตัว, แขน, ขา)
+                    * **ข้อดี:** ลดการกัด Air-Cutting สุญญากาศรอบตัวโมเดล ประหยัดโฟมก้อนใหญ่ และช่วยให้ดอกกัดเข้าถึงจุดลึกได้ง่ายขึ้น
+                    """)
+                else:
+                    st.info("📐 **แนะนำ: ตัดแบ่งบล็อกสมมาตร 2–4 ส่วน (Grid / Layer Slicing)**")
+                    st.write("""
+                    * **วิธีจัดวาง:** หั่นโฟมเป็นแผ่น/บล็อกทรงสี่เหลี่ยม 2–4 ชิ้นเท่าๆ กัน
+                    * **ข้อดี:** เข้ากับขนาดบล็อกโฟมมาตรฐาน สะดวกต่อการนำมาต่อกาวและขัดโป๊ว
+                    """)
 
-        with tab_modular:
-            col_vm1, col_vm2 = st.columns([2, 1])
-            with col_vm1:
-                # จำลองผังแบบแยกชิ้นโดยปรับพารามิเตอร์การซอยย่อยแบบรังผึ้ง/ชิ้นส่วนย่อย
-                fig_modular = create_foam_grid_visualizer(
-                    x_mm=x_mm * 0.8, y_mm=y_mm * 0.8, z_mm=z_mm * 0.8,
-                    max_segment_mm=0.6 * 1000.0,
-                    wall_thickness_mm=50,
-                    mesh=current_mesh
-                )
-                st.plotly_chart(fig_modular, use_container_width=True, key="modular_chart")
-            with col_vm2:
-                st.success("**คำแนะนำสำหรับการกัดแยกชิ้นตามข้อต่อ:**")
-                st.write("""
-                * **กระบวนการ:** ถอดแยกโมเดลตามแขน ขา ลำตัว หรือองค์ประกอบย่อย แล้วนำมาจัดวางแนบกันบนเตียงกัด
-                * **จุดเด่น:** ลดการสูญเสียโฟมดิบอย่างมาก (สูงสุด 20-40%) และช่วยให้ดอกกัดเข้าถึงจุดซอกลึกได้ง่ายขึ้น
-                * **ข้อเสีย:** ต้องเสียเวลาเพิ่มในขั้นตอนการประกอบ ต่อกาว และขัดรอยต่อชิ้นงาน
-                """)
+        with col_rec2:
+            if submesh_count > 1:
+                est_time_saved = 45
+                est_material_saved = 35
+            else:
+                est_time_saved = 35 if is_flat else (40 if aspect_ratio > 2.2 else 20)
+                est_material_saved = 30 if is_flat else (35 if aspect_ratio > 2.2 else 15)
+                
+            st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
+            st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
 
     # ==========================================
     # 📦 ระบบเลือกวัสดุจาก Master Data
@@ -1277,7 +1239,7 @@ elif page == t["page_2_name"]:
             with c2:
                 hc_rate = st.number_input(
                     f"{t['finish_rate'] if hc_info['billing']=='sq.m.' else ('อัตรา (฿/งาน)' if lang=='TH' else 'Rate (฿/job)')}",
-                    min_value=0.0, value=float(hc_info["rate"]), step=10.0, key=f"hc_rate_work_{hc_item}"
+                    min_value=0.0, value=float(hc_info["rate"]), step=10.0, key=f"hc_rate_work_input_{hc_item}"
                 )
             with c3:
                 if hc_info["billing"] == "sq.m.":
