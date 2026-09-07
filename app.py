@@ -167,16 +167,12 @@ def calculate_precision_machining_estimation(
     # 4. Total Machining Hours
     roughing_hours = (roughing_time_min * rapid_factor) / 60.0
     finishing_hours = (finishing_time_min * rapid_factor) / 60.0
-    
-    # 5. Glue Estimation (Based on surface area)
-    glue_g = total_surface_area_mm2 * 0.0002
 
     return {
         "roughing_hours": round(roughing_hours, 2),
         "finishing_hours": round(finishing_hours, 2),
         "total_hours": round(roughing_hours + finishing_hours, 2),
         "raw_foam_m3": round(raw_foam_m3, 4),
-        "glue_g": round(glue_g, 1)
     }
 
 # ==========================================
@@ -1017,7 +1013,7 @@ elif page == t["page_2_name"]:
                         key=f"op_qty_rough_{round(float(suggested_rough), 4)}"
                     )
                     op_qty_finish = st.number_input(
-                        "ชั่วโมงกัดละเอียด (Finishing)" if lang == "TH" else "Finishing hours",
+                        "ชั่วโมงกัดรายละเอียด (Finishing)" if lang == "TH" else "Finishing hours",
                         min_value=0.0, value=float(suggested_finish), step=0.25,
                         key=f"op_qty_finish_{round(float(suggested_finish), 4)}"
                     )
@@ -1092,7 +1088,7 @@ elif page == t["page_2_name"]:
                 st.rerun()
 
     # ----------------------------------------------------------------------
-    # 🧩 Plotly Foam Slicing Visualizer & Precision Material Metrics
+    # 🧩 Foam Cutting Strategy Comparison & Visualizer
     # ----------------------------------------------------------------------
     x_mm = st.session_state.get("width_x_mm", 0.0)
     y_mm = st.session_state.get("length_y_mm", 0.0)
@@ -1100,64 +1096,73 @@ elif page == t["page_2_name"]:
 
     if x_mm > 0 and y_mm > 0 and z_mm > 0:
         st.markdown("---")
-        with st.expander("🧩 ภาพจำลองผังการตัดแบ่งบล็อกโฟม (Foam Slicing Visualizer)", expanded=True):
-            col_v1, col_v2 = st.columns(2)
-            with col_v1:
-                max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 0.5, 2.0, 1.0, 0.1, key="p2_max_seg")
-            with col_v2:
-                wall_thick = st.slider("ความหนาเปลือกโฟม Hollow Shell (มม.)", 30, 150, 75, 5, key="p2_wall_thick")
+        st.markdown("### 🧩 เปรียบเทียบกลยุทธ์การตัดกัดโฟม (Foam Cutting Strategy Comparison)")
+        st.caption("ประเมินการใช้วัสดุโฟมดิบและเปรียบเทียบระหว่างการกัดแบบระนาบ (Planar Split) และการกัดแยกชิ้นตามข้อต่อ (Modular Joint Split)")
 
-            current_mesh = st.session_state.get("mesh")
+        current_mesh = st.session_state.get("mesh")
 
-            fig_grid = create_foam_grid_visualizer(
-                x_mm=x_mm,
-                y_mm=y_mm,
-                z_mm=z_mm,
-                max_segment_mm=max_seg_m * 1000.0,
-                wall_thickness_mm=wall_thick,
-                mesh=current_mesh
-            )
-            st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
+        # --- คำนวณปริมาตรการใช้วัสดุของทั้ง 2 รูปแบบ ---
+        # 1. การกัดแบบระนาบ (Planar Split): ใช้ Bounding Box รวมตรงๆ + Margin Safety
+        planar_vol_m3 = (x_mm * y_mm * z_mm * 1.05) / 1e9
 
-        st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
+        # 2. การกัดแบบแยกชิ้นตามข้อต่อ (Modular Joint Split): 
+        # ประเมินจากปริมาตรเนื้อโฟมส่วนปิดล้อมจริง (Convex Hull / Exact Volume) + Allowance การประกอบ 20%
+        if current_mesh is not None:
+            mesh_vol = current_mesh.volume if getattr(current_mesh, 'is_watertight', False) else current_mesh.convex_hull.volume
+            modular_vol_m3 = (mesh_vol * 1.20) / 1e9
+        else:
+            modular_vol_m3 = planar_vol_m3 * 0.70  # ค่าประมาณการณ์เริ่มต้นหากไม่มี Mesh
 
-        submesh_count = st.session_state.get("submesh_count", 1)
-        col_rec1, col_rec2 = st.columns([2, 1])
+        # คำนวณเปอร์เซ็นต์ความประหยัด
+        savings_percent = max(0.0, ((planar_vol_m3 - modular_vol_m3) / planar_vol_m3) * 100) if planar_vol_m3 > 0 else 0.0
 
-        with col_rec1:
-            if submesh_count > 1:
-                st.success(f"🧩 **ตรวจพบโมเดลแยกชิ้นส่วนแล้ว ({submesh_count} ชิ้นส่วน)**")
+        # Card แสดงผลเปรียบเทียบ
+        c_m1, c_m2, c_m3 = st.columns(3)
+        c_m1.metric("📦 กัดแบบระนาบ (Planar)", f"{planar_vol_m3:.3f} m³", "บล็อกสี่เหลี่ยมเต็ม")
+        c_m2.metric("✂️ กัดแยกชิ้นตามข้อต่อ (Modular)", f"{modular_vol_m3:.3f} m³", f"-{savings_percent:.1f}% เนื้อโฟม")
+        c_m3.metric("💡 สรุปผลลัพธ์", "แยกชิ้นประหยัดกว่า" if savings_percent > 5 else "ระนาบคุ้มค่ากว่า", f"ประหยัดได้ ~{savings_percent:.1f}%")
+
+        # --- ส่วนจำลอง visualizer ทั้ง 2 แบบ ---
+        st.markdown("#### 🖥️ จำลองการจัดวางและผังการตัดโฟมทั้ง 2 แบบ")
+        tab_planar, tab_modular = st.tabs(["📐 1. การกัดแบบระนาบ (Planar Split)", "✂️ 2. การกัดแยกชิ้นตามข้อต่อ (Modular Joint Split)"])
+
+        with tab_planar:
+            col_vp1, col_vp2 = st.columns([2, 1])
+            with col_vp1:
+                max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 0.5, 2.0, 1.0, 0.1, key="planar_max_seg")
+                fig_planar = create_foam_grid_visualizer(
+                    x_mm=x_mm, y_mm=y_mm, z_mm=z_mm,
+                    max_segment_mm=max_seg_m * 1000.0,
+                    wall_thickness_mm=75,
+                    mesh=current_mesh
+                )
+                st.plotly_chart(fig_planar, use_container_width=True, key="planar_chart")
+            with col_vp2:
+                st.info("**คำแนะนำสำหรับการกัดแบบระนาบ:**")
                 st.write("""
-                * **กลยุทธ์:** นำแต่ละชิ้นส่วน (เช่น แขน, ขา, ลำตัว) เข้ากระบวนการจัดวางบนเตียงกัดแยกกัน
-                * **ข้อดี:** ไม่ต้องผ่าไฟล์ใหม่ ประหยัดเนื้อโฟมได้สูงสุด และสามารถรันกัดพร้อมกันหลายเครื่องได้ทันที
+                * **กระบวนการ:** แบ่งบล็อกโฟมเป็นทรงสี่เหลี่ยมตามระดับชั้นความสูงหรือความกว้าง
+                * **จุดเด่น:** ตั้งค่าเครื่องง่าย เลื่อยโฟมดิบได้รวดเร็ว เหมาะกับงานโครงสร้างหลักหรืองานที่ไม่ซับซ้อนมาก
+                * **ข้อเสีย:** เสียเศษโฟมส่วนเกินจากการกัด Air-Cutting รอบตัวโมเดลค่อนข้างมาก
                 """)
-            else:
-                aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
-                is_flat = (z_mm < x_mm * 0.5) or (z_mm < y_mm * 0.5)
-                
-                if is_flat:
-                    st.info("🎯 **แนะนำ: ตัดแบ่ง 2 ซีกหน้า-หลัง (2-Plane Split / Half-Split)**")
-                    st.write("""
-                    * **วิธีจัดวาง:** ผ่าครึ่งโมเดลตามแนวราบ วางโฟมราบกับเตียงกัด (เหมาะกับงานนูนหรือครึ่งองค์)
-                    * **ข้อดี:** ล็อกชิ้นงานง่าย กัดเรียบเนียน ประหยัดเวลา ไม่ต้องใช้เครื่องกัดหลายแกนซับซ้อน
-                    """)
-                elif aspect_ratio > 2.2:
-                    st.warning("✂️ **แนะนำ: ถอดแยกชิ้นส่วนตามข้อต่อ (Modular Joint Split)**")
-                    st.write("""
-                    * **วิธีจัดวาง:** ใช้ Plane Slice แบ่งโฟมตามสัดส่วนองค์ประกอบ (เช่น หัว, ลำตัว, แขน, ขา)
-                    * **ข้อดี:** ลดการกัด Air-Cutting สุญญากาศรอบตัวโมเดล ประหยัดโฟมก้อนใหญ่ และช่วยให้ดอกกัดเข้าถึงจุดลึกได้ง่ายขึ้น
-                    """)
-                else:
-                    st.info("📐 **แนะนำ: ตัดแบ่งบล็อกสมมาตร 2–4 ส่วน (Grid / Layer Slicing)**")
-                    st.write("""
-                    * **วิธีจัดวาง:** หั่นโฟมเป็นแผ่น/บล็อกทรงสี่เหลี่ยม 2–4 ชิ้นเท่าๆ กัน
-                    * **ข้อดี:** เข้ากับขนาดบล็อกโฟมมาตรฐาน สะดวกต่อการนำมาต่อกาวและขัดโป๊ว
-                    """)
 
-        with col_rec2:
-            prec_est = calculate_precision_machining_estimation(current_mesh)
-            st.metric(label="📦 ปริมาตรก้อนโฟมดิบรวม (OBB)", value=f"{prec_est['raw_foam_m3']} m³")
-            st.metric(label="🧪 ปริมาณกาว PU สำหรับประกอบ", value=f"~{prec_est['glue_g']} g")
+        with tab_modular:
+            col_vm1, col_vm2 = st.columns([2, 1])
+            with col_vm1:
+                # จำลองผังแบบแยกชิ้นโดยปรับพารามิเตอร์การซอยย่อยแบบรังผึ้ง/ชิ้นส่วนย่อย
+                fig_modular = create_foam_grid_visualizer(
+                    x_mm=x_mm * 0.8, y_mm=y_mm * 0.8, z_mm=z_mm * 0.8,
+                    max_segment_mm=0.6 * 1000.0,
+                    wall_thickness_mm=50,
+                    mesh=current_mesh
+                )
+                st.plotly_chart(fig_modular, use_container_width=True, key="modular_chart")
+            with col_vm2:
+                st.success("**คำแนะนำสำหรับการกัดแยกชิ้นตามข้อต่อ:**")
+                st.write("""
+                * **กระบวนการ:** ถอดแยกโมเดลตามแขน ขา ลำตัว หรือองค์ประกอบย่อย แล้วนำมาจัดวางแนบกันบนเตียงกัด
+                * **จุดเด่น:** ลดการสูญเสียโฟมดิบอย่างมาก (สูงสุด 20-40%) และช่วยให้ดอกกัดเข้าถึงจุดซอกลึกได้ง่ายขึ้น
+                * **ข้อเสีย:** ต้องเสียเวลาเพิ่มในขั้นตอนการประกอบ ต่อกาว และขัดรอยต่อชิ้นงาน
+                """)
 
     # ==========================================
     # 📦 ระบบเลือกวัสดุจาก Master Data
