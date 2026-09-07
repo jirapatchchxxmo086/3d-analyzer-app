@@ -8,6 +8,7 @@ import pandas as pd
 from string import Template
 import streamlit.components.v1 as components
 import auth
+from grid_visualizer import create_foam_grid_visualizer
 auth.require_login()
 
 # ==========================================
@@ -1081,7 +1082,31 @@ elif page == t["page_2_name"]:
             if st.button(t["op_clear_btn"]):
                 st.session_state["selected_operations"] = []
                 st.rerun()
+    # ----------------------------------------------------------------------
+        # 🧩 ส่วนแสดง Plotly Foam Slicing Visualizer (วางใต้ส่วน Robot / เครื่องจักร)
+        # ----------------------------------------------------------------------
+        x_mm = st.session_state.get("width_x_mm", 0.0)
+        y_mm = st.session_state.get("length_y_mm", 0.0)
+        z_mm = st.session_state.get("height_z_mm", 0.0)
 
+        if x_mm > 0 and y_mm > 0 and z_mm > 0:
+            st.markdown("---")
+            with st.expander("🧩 ภาพจำลองผังการตัดแบ่งบล็อกโฟม (Foam Slicing Visualizer)", expanded=True):
+                col_v1, col_v2 = st.columns(2)
+                with col_v1:
+                    max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 0.5, 2.0, 1.0, 0.1, key="p2_max_seg")
+                with col_v2:
+                    wall_thick = st.slider("ความหนาเปลือกโฟม Hollow Shell (มม.)", 30, 150, 75, 5, key="p2_wall_thick")
+
+                fig_grid = create_foam_grid_visualizer(
+                    x_mm=x_mm,
+                    y_mm=y_mm,
+                    z_mm=z_mm,
+                    max_segment_mm=max_seg_m * 1000.0,
+                    wall_thickness_mm=wall_thick
+                )
+                
+                    st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
     # ==========================================
     # 📦 ระบบเลือกวัสดุจาก Master Data
     # ==========================================
