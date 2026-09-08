@@ -1070,19 +1070,23 @@ elif page == t["page_2_name"]:
 
             current_mesh = st.session_state.get("mesh")
 
-            fig_grid = create_foam_grid_visualizer(
-                x_mm=x_mm,
-                y_mm=y_mm,
-                z_mm=z_mm,
-                max_segment_mm=max_seg_m * 1000.0,
-                wall_thickness_mm=wall_thick,
-                mesh=current_mesh
-            )
+           submesh_count = st.session_state.get("submesh_count", 1)
+    current_slice_mode = "modular" if submesh_count > 1 else "planar"
+
+    fig_grid = create_foam_grid_visualizer(
+        x_mm=x_mm,
+        y_mm=y_mm,
+        z_mm=z_mm,
+        max_segment_mm=max_seg_m * 1000.0,
+        wall_thickness_mm=wall_thick,
+        mesh=current_mesh,
+        slice_mode=current_slice_mode
+    )
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
 
         st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
-        submesh_count = st.session_state.get("submesh_count", 1)
+
         col_rec1, col_rec2 = st.columns([2, 1])
 
         aspect_ratio = max(x_mm, y_mm, z_mm) / (min(x_mm, y_mm, z_mm) + 1e-5)
