@@ -128,7 +128,17 @@ def estimate_3d_print_hours(
     infill_fraction = max(0.0, min(100.0, infill_pct)) / 100.0
     
     effective_volume_cm3 = max(volume_cm3, 0) * (shell_frac + (1.0 - shell_frac) * infill_fraction)
-    total_hours = max(effective_volume_cm3 * base_rate, p["min_job_hours"])
+    
+    # คำนวณชั่วโมงพิมพ์ FDM แบบสเกลนอนลีเนียร์สำหรับงานใหญ่
+    if effective_volume_cm3 > 5000 and technology == "FDM":
+        base_hours = 5000 * base_rate
+        extra_vol = effective_volume_cm3 - 5000
+        extra_hours = (extra_vol ** 0.78) * (base_rate * 0.35)
+        raw_hours = base_hours + extra_hours
+    else:
+        raw_hours = effective_volume_cm3 * base_rate
+
+    total_hours = max(raw_hours, p["min_job_hours"])
 
     return MachiningEstimate(
         hours=round(total_hours, 2),
@@ -136,6 +146,6 @@ def estimate_3d_print_hours(
             "technology": technology,
             "effective_volume_cm3": round(effective_volume_cm3, 2),
             "rate_used_hours_per_cm3": base_rate,
-            "hours_per_cm3": base_rate,  # รองรับ app.py เดิมเพื่อป้องกัน KeyError
+            "hours_per_cm3": base_rate,  # รองรับ app.py เพื่อป้องกัน KeyError
         },
     )
