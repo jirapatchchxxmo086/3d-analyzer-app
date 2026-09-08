@@ -10,21 +10,21 @@ from typing import Dict, Any, Optional
 FOAM_CNC_MACHINES = {
     "Robot_Foam": {
         "max_feed_rate_mm_min": 3500.0,
-        "efficiency_factor": 0.75,  # เผื่อเวลาชะลอตามมุมและการยก Toolpath
+        "efficiency_factor": 0.75,
         "min_job_hours": 0.50,
         "processes": {
             "roughing": {
                 "tool_diameter_mm": 20.0,
                 "stepover_ratio": 0.40,
-                "stepdown_mm": 12.0,     # ปรับลดจาก 25mm ให้สมจริงกับระยะกินโฟมจริง
-                "recommended_feed_mm_min": 2500.0, # Feed rate กัดหยาบที่ปลอดภัย
-                "safety_margin": 1.25,   # เผื่อเวลา Retract / Clearance
+                "stepdown_mm": 12.0,
+                "recommended_feed_mm_min": 2500.0,
+                "safety_margin": 1.25,
             },
             "finishing": {
                 "min_tool_diameter_mm": 6.0,
                 "max_tool_diameter_mm": 20.0,
-                "stepover_ratio": 0.12,  # Stepover ถี่ขึ้นเพื่อเก็บผิวเนียน
-                "recommended_feed_mm_min": 2000.0, # Feed rate เก็บรายละเอียด
+                "stepover_ratio": 0.12,
+                "recommended_feed_mm_min": 2000.0,
                 "safety_margin": 1.20,
             },
         },
@@ -32,7 +32,7 @@ FOAM_CNC_MACHINES = {
 }
 
 FDM_PRINT_DEFAULTS = {
-    "hours_per_cm3": 0.013617,  # ปรับจูนตาม Benchmark ใบประเมินจริง (279.5 ชม. / 20,525.72 cm3)
+    "hours_per_cm3": 0.013617,
     "shell_fraction": 0.3,
     "min_job_hours": 0.25,
 }
@@ -70,7 +70,7 @@ def estimate_foam_cnc_hours(
     volume_removal_mm3 = max(actual_roughing_vol_cm3, 0) * 1000.0
     surface_area_mm2 = max(surface_area_sqm, 0) * 1_000_000.0
 
-    # --- คำนวณ Roughing ---
+    # --- Roughing ---
     complexity_rough_factor = 1.0 + (complexity_level - 1) * 0.08
     stepover_rough_mm = rough["tool_diameter_mm"] * rough["stepover_ratio"]
     stepdown_mm = rough["stepdown_mm"]
@@ -82,7 +82,7 @@ def estimate_foam_cnc_hours(
     rough_feed = min(rough["recommended_feed_mm_min"], machine["max_feed_rate_mm_min"]) * machine["efficiency_factor"]
     roughing_time_min = (roughing_path_mm / rough_feed * rough["safety_margin"]) if rough_feed > 0 else 0.0
 
-    # --- คำนวณ Finishing ---
+    # --- Finishing ---
     finish_tool_mm = finish["max_tool_diameter_mm"] - (
         finish["max_tool_diameter_mm"] - finish["min_tool_diameter_mm"]
     ) * (complexity_level - 1) / 9.0
@@ -135,18 +135,30 @@ def estimate_3d_print_hours(
         )
 
     # -------------------------------------------------------------
-    # FDM Fixed Calibrated Rate (0.013617 hr/cm3)
+    # FDM Dynamic Rate Scaling (Non-linear for Large Scale Models)
     # -------------------------------------------------------------
-    calibrated_rate = hours_per_cm3 or p["hours_per_cm3"]
-    
-    total_hours = max(max(volume_cm3, 0) * calibrated_rate, p["min_job_hours"])
+    base_rate = hours_per_cm3 or p["hours_per_cm3"]
+    vol = max(volume_cm3, 0)
+
+    # ใช้สูตรสเกลอัตราลดทอน (Diminishing Return) เมื่อปริมาตร > 15,000 cm3 (จำลองการใช้ High Flow Nozzle)
+    if vol > 15000:
+        base_hrs = 15000 * base_rate
+        extra_vol = vol - 15000
+        # สเกลปรับลดอัตราสำหรับปริมาตรส่วนเกิน
+        extra_hrs = (extra_vol ** 0.55) * 0.237
+        total_hours = base_hrs + extra_hrs
+    else:
+        total_hours = vol * base_rate
+
+    total_hours = max(total_hours, p["min_job_hours"])
+    effective_rate = total_hours / vol if vol > 0 else base_rate
 
     return MachiningEstimate(
         hours=round(total_hours, 2),
         breakdown={
             "technology": technology,
-            "effective_volume_cm3": round(volume_cm3, 2),
-            "rate_used_hours_per_cm3": calibrated_rate,
-            "hours_per_cm3": calibrated_rate,  # ป้องกัน KeyError ใน app.py
+            "effective_volume_cm3": round(vol, 2),
+            "rate_used_hours_per_cm3": round(effective_rate, 6),
+            "hours_per_cm3": round(effective_rate, 6),  # ส่งอัตราเฉลี่ยจริงแสดงในหน้าเว็บ
         },
     )
