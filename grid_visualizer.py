@@ -21,23 +21,55 @@ def get_submeshes(mesh):
     submeshes.sort(key=lambda m: m.extents.prod(), reverse=True)
     return submeshes
 
-def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_thickness_mm=75.0, mesh=None, slice_mode="planar"):
+def align_mesh_optimal(mesh):
+    """
+    ปรับหมุน Mesh ให้อยู่ในมุมที่ใช้ปริมาตร Bounding Box น้อยที่สุด (Oriented Bounding Box)
+    เพื่อประหยัดเนื้อโฟมและง่ายต่อการประกอบ
+    """
+    if mesh is None:
+        return None, np.eye(4)
+    
+    # คำนวณ Transform matrix สำหรับ Oriented Bounding Box
+    obb_transform = mesh.bounding_box_oriented.transform
+    mesh_aligned = mesh.copy()
+    mesh_aligned.apply_transform(np.linalg.inv(obb_transform))
+    
+    return mesh_aligned, obb_transform
+
+def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_thickness_mm=75.0, mesh=None, slice_mode="planar", custom_rotation=(0,0,0)):
     fig = go.Figure()
 
-    if slice_mode == "planar":
+    # กรณีโหมด Optimal (หมุนหาทิศทางประหยัดโฟม) หรือ Planar
+    if slice_mode in ["planar", "optimal"]:
         if mesh is not None:
-            vertices = mesh.vertices.copy()
-            bounds = mesh.bounds
+            working_mesh = mesh.copy()
+            
+            # ถ้าเลือกโหมด Optimal ให้คำนวณหมุนหาองศาประหยัดพื้นที่
+            if slice_mode == "optimal":
+                working_mesh, _ = align_mesh_optimal(working_mesh)
+            
+            # หากมีการกำหนด custom rotation เพิ่มเติม (rx, ry, rz)
+            rx, ry, rz = custom_rotation
+            if rx != 0 or ry != 0 or rz != 0:
+                rad_x, rad_y, rad_z = np.radians(rx), np.radians(ry), np.radians(rz)
+                rot_x = trimesh.transformations.rotation_matrix(rad_x, [1, 0, 0])
+                rot_y = trimesh.transformations.rotation_matrix(rad_y, [0, 1, 0])
+                rot_z = trimesh.transformations.rotation_matrix(rad_z, [0, 0, 1])
+                transform = trimesh.transformations.concatenate_matrices(rot_x, rot_y, rot_z)
+                working_mesh.apply_transform(transform)
+
+            vertices = working_mesh.vertices.copy()
+            bounds = working_mesh.bounds
             center = (bounds[0] + bounds[1]) / 2.0
             
-            # ย้ายจุดศูนย์กลางมาที่ Center (X, Y) และวางฐานไว้ที่ Z=0
+            # จัดตำแหน่งให้อยู่ตรงกลาง XY และฐาน Z=0
             vertices[:, 0] -= center[0]
             vertices[:, 1] -= center[1]
             vertices[:, 2] -= bounds[0][2]
             
             fig.add_trace(go.Mesh3d(
                 x=vertices[:, 0], y=vertices[:, 1], z=vertices[:, 2],
-                i=mesh.faces[:, 0], j=mesh.faces[:, 1], k=mesh.faces[:, 2],
+                i=working_mesh.faces[:, 0], j=working_mesh.faces[:, 1], k=working_mesh.faces[:, 2],
                 color='#1E3A8A', opacity=0.9, name='โมเดลหลัก', showlegend=False
             ))
             
@@ -50,6 +82,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
             by0, by1 = -y_mm / 2.0, y_mm / 2.0
             bz0, bz1 = 0, z_mm
 
+        # แสดง Bounding Box บล็อกโฟมรวม
         box_verts = np.array([
             [bx0, by0, bz0], [bx1, by0, bz0], [bx1, by1, bz0], [bx0, by1, bz0],
             [bx0, by0, bz1], [bx1, by0, bz1], [bx1, by1, bz1], [bx0, by1, bz1]
@@ -62,6 +95,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
             color='#38BDF8', opacity=0.15, showlegend=False
         ))
 
+        # แสดงระนาบตัดแยกชั้นโฟม
         total_height = bz1 - bz0
         num_slices = math.ceil(total_height / max_segment_mm) if max_segment_mm > 0 else 1
         for s in range(1, num_slices):
@@ -77,6 +111,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
                 ))
 
     else:
+        # โหมด Modular สไลซ์ก้อนย่อย
         submeshes = get_submeshes(mesh)
         
         if len(submeshes) > 0:
@@ -112,36 +147,16 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
                     i=submesh.faces[:, 0], j=submesh.faces[:, 1], k=submesh.faces[:, 2],
                     color='#1E3A8A', opacity=0.95, showlegend=False, flatshading=True
                 ))
-                
-                sx, sy, sz = submesh.extents[0], submesh.extents[1], submesh.extents[2]
-                bx0, bx1 = grid_center_x - sx/2.0, grid_center_x + sx/2.0
-                by0, by1 = grid_center_y - sy/2.0, grid_center_y + sy/2.0
-                bz0, bz1 = 0, sz
-                
-                box_verts = np.array([
-                    [bx0, by0, bz0], [bx1, by0, bz0], [bx1, by1, bz0], [bx0, by1, bz0],
-                    [bx0, by0, bz1], [bx1, by0, bz1], [bx1, by1, bz1], [bx0, by1, bz1]
-                ])
-                
-                fig.add_trace(go.Mesh3d(
-                    x=box_verts[:, 0], y=box_verts[:, 1], z=box_verts[:, 2],
-                    i=[0, 0, 4, 4, 0, 0, 1, 1, 0, 0, 3, 3],
-                    j=[1, 2, 5, 6, 3, 7, 2, 6, 4, 5, 7, 6],
-                    k=[2, 3, 6, 7, 7, 4, 6, 5, 5, 1, 6, 2],
-                    color='#38BDF8', opacity=0.20, showlegend=False,
-                    hoverinfo='text', text=f"ก้อนโฟมชิ้นที่ {idx+1}<br>ขนาด: {sx:.0f} x {sy:.0f} x {sz:.0f} mm"
-                ))
 
-    # ปรับแต่งกล้องและสัดส่วนให้ซูมเข้าพอดีชิ้นงาน และหมุนปรับมุมมองได้ง่ายขึ้น
     fig.update_layout(
         scene=dict(
             xaxis=dict(title='X (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
             yaxis=dict(title='Y (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
             zaxis=dict(title='Z (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
-            aspectmode='cube',
+            aspectmode='data',
             camera=dict(
-                eye=dict(x=1.25, y=1.25, z=0.88),
-                center=dict(x=0, y=0, z=0)
+                eye=dict(x=1.1, y=-1.3, z=0.6),
+                center=dict(x=0, y=0, z=0.2)
             )
         ),
         margin=dict(l=0, r=0, b=0, t=10),
