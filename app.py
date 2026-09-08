@@ -384,6 +384,260 @@ page = st.sidebar.radio("", nav_options, key="nav_page_choice")
 
 st.sidebar.divider()
 
+# Helper Functions
+scale_to_m = 0.001
+
+def process_and_clean_mesh(loaded_data):
+    sub_count = 1
+    if isinstance(loaded_data, trimesh.Scene):
+        geometries = []
+        for node_name in loaded_data.graph.nodes_geometry:
+            transform, geometry_name = loaded_data.graph[node_name]
+            geom = loaded_data.geometry[geometry_name].copy()
+            geom.apply_transform(transform)
+            geometries.append(geom)
+
+        sub_count = len(geometries) if geometries else 1
+        if geometries:
+            mesh = trimesh.util.concatenate(geometries)
+        else:
+            mesh = trimesh.Trimesh()
+    else:
+        mesh = loaded_data
+
+    if isinstance(mesh, trimesh.Trimesh):
+        try:
+            mesh.update_faces(mesh.unique_faces())
+        except Exception:
+            pass
+        try:
+            mesh.remove_degenerate_faces()
+        except Exception:
+            pass
+        try:
+            mesh.remove_infinite_values()
+        except Exception:
+            pass
+
+    return mesh, sub_count
+
+def analyze_surface_complexity(mesh, scale_to_m, is_point_cloud):
+    if is_point_cloud or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
+        return {"score": None, "level": None, "error": "Point Cloud (No faces)"}
+
+    if len(mesh.faces) == 0:
+        return {"score": None, "level": None, "error": "No faces in mesh"}
+
+    area_raw = mesh.area
+    if area_raw <= 0:
+        return {"score": None, "level": None, "error": "Surface area is 0"}
+
+    area_m2 = area_raw * (scale_to_m ** 2)
+
+    area_ratio = None
+    area_error = None
+    try:
+        hull = mesh.convex_hull
+        hull_area = hull.area
+        if hull_area > 0:
+            area_ratio = float(area_raw / hull_area)
+        else:
+            area_error = "Convex Hull area is 0"
+    except Exception as e:
+        area_error = str(e)
+
+    surface_roughness = None
+    roughness_error = None
+    try:
+        face_adjacency = mesh.face_adjacency
+        if len(face_adjacency) > 0:
+            normals = mesh.face_normals
+            n0 = normals[face_adjacency[:, 0]]
+            n1 = normals[face_adjacency[:, 1]]
+            dot_products = np.clip(np.sum(n0 * n1, axis=1), -1.0, 1.0)
+            angles_rad = np.arccos(dot_products)
+            surface_roughness = float(np.mean(angles_rad))
+        else:
+            surface_roughness = 0.0
+    except Exception as e:
+        roughness_error = str(e)
+
+    face_density_per_m2 = float(len(mesh.faces) / area_m2) if area_m2 > 0 else 0.0
+
+    score_components = []
+    if area_ratio is not None:
+        s_area = float(np.clip(1 - np.exp(-1.2 * max(area_ratio - 1.0, 0.0)), 0.0, 1.0)) * 100
+        score_components.append(s_area)
+
+    if surface_roughness is not None:
+        s_rough = float(np.clip(1 - np.exp(-2.5 * surface_roughness), 0.0, 1.0)) * 100
+        score_components.append(s_rough)
+
+    if not score_components:
+        return {"score": None, "level": None, "error": f"{area_error} | {roughness_error}"}
+
+    detail_score = round(sum(score_components) / len(score_components), 1)
+
+    if detail_score < 20:
+        level = "Simple Surface" if lang == "EN" else "ผิวเรียบง่าย"
+    elif detail_score < 45:
+        level = "Moderate Surface" if lang == "EN" else "ผิวมีรายละเอียดปานกลาง"
+    elif detail_score < 70:
+        level = "Detailed Surface" if lang == "EN" else "ผิวมีรายละเอียดสูง"
+    else:
+        level = "Highly Complex Surface" if lang == "EN" else "ผิวมีความซับซ้อนสูงมาก"
+
+    return {
+        "score": detail_score,
+        "level": level,
+        "area_ratio": round(area_ratio, 3) if area_ratio is not None else None,
+        "surface_roughness_deg": round(np.degrees(surface_roughness), 2) if surface_roughness is not None else None,
+        "face_density": round(face_density_per_m2, 1),
+        "total_faces": len(mesh.faces),
+        "area_error": area_error,
+        "roughness_error": roughness_error
+    }
+
+HTML_TEMPLATE = Template("""
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        #viewer-container { width: 100%; height: 500px; position: relative; }
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #ffffff; font-family: sans-serif; font-size: 14px; pointer-events: none;
+        }
+        #viewer-toolbar {
+            position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 8px; z-index: 10;
+        }
+        #viewer-toolbar button {
+            width: 36px; height: 36px; border-radius: 8px; border: none;
+            background: rgba(255,255,255,0.92); color: #3A2E26;
+            font-size: 16px; cursor: pointer; display: flex;
+            align-items: center; justify-content: center;
+        }
+        #viewer-toolbar button:hover { background: #ffffff; }
+    </style>
+</head>
+<body>
+    <div id="viewer-container">
+        <div id="loading">Loading 3D Model...</div>
+        <div id="viewer-toolbar">
+            <button id="btn-reset" title="Reset view">&#8635;</button>
+            <button id="btn-zoom-in" title="Zoom in">+</button>
+            <button id="btn-zoom-out" title="Zoom out">&minus;</button>
+        </div>
+    </div>
+    <script>
+        const container = document.getElementById('viewer-container');
+        const loading = document.getElementById('loading');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / 500, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, 500);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const ambientLight = new THREE.AmbientLight(0x777777);
+        scene.add(ambientLight);
+
+        const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight1.position.set(1, 1, 1).normalize();
+        scene.add(dirLight1);
+
+        const dirLight2 = new THREE.DirectionalLight(0x555555, 0.5);
+        dirLight2.position.set(-1, -1, -1).normalize();
+        scene.add(dirLight2);
+
+        function base64ToArrayBuffer(base64) {
+            var binary_string = window.atob(base64);
+            var len = binary_string.length;
+            var bytes = new Uint8Array(len);
+            for (var i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        let initialCameraPos = null;
+
+        try {
+            const loader = new THREE.STLLoader();
+            const arrayBuffer = base64ToArrayBuffer("$b64_stl");
+            const geometry = loader.parse(arrayBuffer);
+
+            geometry.center();
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x2196F3,
+                roughness: 0.3,
+                metalness: 0.2
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            geometry.computeBoundingSphere();
+            const radius = geometry.boundingSphere.radius;
+            camera.position.set(radius * 2.2, radius * 2.2, radius * 2.2);
+            camera.lookAt(0, 0, 0);
+            controls.update();
+            initialCameraPos = camera.position.clone();
+
+            loading.style.display = 'none';
+        } catch (err) {
+            loading.innerText = 'Failed to load 3D preview';
+            console.error(err);
+        }
+
+        document.getElementById('btn-zoom-in').addEventListener('click', function () {
+            camera.position.multiplyScalar(0.8);
+            controls.update();
+        });
+        document.getElementById('btn-zoom-out').addEventListener('click', function () {
+            camera.position.multiplyScalar(1.25);
+            controls.update();
+        });
+        document.getElementById('btn-reset').addEventListener('click', function () {
+            if (initialCameraPos) {
+                camera.position.copy(initialCameraPos);
+                controls.target.set(0, 0, 0);
+                controls.update();
+            }
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
+""")
+
+def render_3d_viewer(mesh_obj):
+    try:
+        if isinstance(mesh_obj, trimesh.PointCloud) or len(mesh_obj.vertices) == 0:
+            return None
+        stl_bytes = mesh_obj.export(file_type='stl')
+        b64_stl = base64.b64encode(stl_bytes).decode('utf-8')
+        return HTML_TEMPLATE.substitute(b64_stl=b64_stl)
+    except Exception:
+        return None
+
 # ==========================================
 # 📦 หน้า 1: วิเคราะห์โมเดล 3D
 # ==========================================
@@ -397,259 +651,6 @@ if page == t["page_1_name"]:
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-    scale_to_m = 0.001
-
-    def process_and_clean_mesh(loaded_data):
-        sub_count = 1
-        if isinstance(loaded_data, trimesh.Scene):
-            geometries = []
-            for node_name in loaded_data.graph.nodes_geometry:
-                transform, geometry_name = loaded_data.graph[node_name]
-                geom = loaded_data.geometry[geometry_name].copy()
-                geom.apply_transform(transform)
-                geometries.append(geom)
-
-            sub_count = len(geometries) if geometries else 1
-            if geometries:
-                mesh = trimesh.util.concatenate(geometries)
-            else:
-                mesh = trimesh.Trimesh()
-        else:
-            mesh = loaded_data
-
-        if isinstance(mesh, trimesh.Trimesh):
-            try:
-                mesh.update_faces(mesh.unique_faces())
-            except Exception:
-                pass
-            try:
-                mesh.remove_degenerate_faces()
-            except Exception:
-                pass
-            try:
-                mesh.remove_infinite_values()
-            except Exception:
-                pass
-
-        return mesh, sub_count
-
-    def analyze_surface_complexity(mesh, scale_to_m, is_point_cloud):
-        if is_point_cloud or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
-            return {"score": None, "level": None, "error": "Point Cloud (No faces)"}
-
-        if len(mesh.faces) == 0:
-            return {"score": None, "level": None, "error": "No faces in mesh"}
-
-        area_raw = mesh.area
-        if area_raw <= 0:
-            return {"score": None, "level": None, "error": "Surface area is 0"}
-
-        area_m2 = area_raw * (scale_to_m ** 2)
-
-        area_ratio = None
-        area_error = None
-        try:
-            hull = mesh.convex_hull
-            hull_area = hull.area
-            if hull_area > 0:
-                area_ratio = float(area_raw / hull_area)
-            else:
-                area_error = "Convex Hull area is 0"
-        except Exception as e:
-            area_error = str(e)
-
-        surface_roughness = None
-        roughness_error = None
-        try:
-            face_adjacency = mesh.face_adjacency
-            if len(face_adjacency) > 0:
-                normals = mesh.face_normals
-                n0 = normals[face_adjacency[:, 0]]
-                n1 = normals[face_adjacency[:, 1]]
-                dot_products = np.clip(np.sum(n0 * n1, axis=1), -1.0, 1.0)
-                angles_rad = np.arccos(dot_products)
-                surface_roughness = float(np.mean(angles_rad))
-            else:
-                surface_roughness = 0.0
-        except Exception as e:
-            roughness_error = str(e)
-
-        face_density_per_m2 = float(len(mesh.faces) / area_m2) if area_m2 > 0 else 0.0
-
-        score_components = []
-        if area_ratio is not None:
-            s_area = float(np.clip(1 - np.exp(-1.2 * max(area_ratio - 1.0, 0.0)), 0.0, 1.0)) * 100
-            score_components.append(s_area)
-
-        if surface_roughness is not None:
-            s_rough = float(np.clip(1 - np.exp(-2.5 * surface_roughness), 0.0, 1.0)) * 100
-            score_components.append(s_rough)
-
-        if not score_components:
-            return {"score": None, "level": None, "error": f"{area_error} | {roughness_error}"}
-
-        detail_score = round(sum(score_components) / len(score_components), 1)
-
-        if detail_score < 20:
-            level = "Simple Surface" if lang == "EN" else "ผิวเรียบง่าย"
-        elif detail_score < 45:
-            level = "Moderate Surface" if lang == "EN" else "ผิวมีรายละเอียดปานกลาง"
-        elif detail_score < 70:
-            level = "Detailed Surface" if lang == "EN" else "ผิวมีรายละเอียดสูง"
-        else:
-            level = "Highly Complex Surface" if lang == "EN" else "ผิวมีความซับซ้อนสูงมาก"
-
-        return {
-            "score": detail_score,
-            "level": level,
-            "area_ratio": round(area_ratio, 3) if area_ratio is not None else None,
-            "surface_roughness_deg": round(np.degrees(surface_roughness), 2) if surface_roughness is not None else None,
-            "face_density": round(face_density_per_m2, 1),
-            "total_faces": len(mesh.faces),
-            "area_error": area_error,
-            "roughness_error": roughness_error
-        }
-
-    HTML_TEMPLATE = Template("""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
-        <style>
-            body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
-            #viewer-container { width: 100%; height: 500px; position: relative; }
-            #loading {
-                position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                color: #ffffff; font-family: sans-serif; font-size: 14px; pointer-events: none;
-            }
-            #viewer-toolbar {
-                position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
-                display: flex; gap: 8px; z-index: 10;
-            }
-            #viewer-toolbar button {
-                width: 36px; height: 36px; border-radius: 8px; border: none;
-                background: rgba(255,255,255,0.92); color: #3A2E26;
-                font-size: 16px; cursor: pointer; display: flex;
-                align-items: center; justify-content: center;
-            }
-            #viewer-toolbar button:hover { background: #ffffff; }
-        </style>
-    </head>
-    <body>
-        <div id="viewer-container">
-            <div id="loading">Loading 3D Model...</div>
-            <div id="viewer-toolbar">
-                <button id="btn-reset" title="Reset view">&#8635;</button>
-                <button id="btn-zoom-in" title="Zoom in">+</button>
-                <button id="btn-zoom-out" title="Zoom out">&minus;</button>
-            </div>
-        </div>
-        <script>
-            const container = document.getElementById('viewer-container');
-            const loading = document.getElementById('loading');
-            const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);
-
-            const camera = new THREE.PerspectiveCamera(45, container.clientWidth / 500, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(container.clientWidth, 500);
-            renderer.setPixelRatio(window.devicePixelRatio);
-            container.appendChild(renderer.domElement);
-
-            const controls = new THREE.OrbitControls(camera, renderer.domElement);
-            controls.enableDamping = true;
-
-            const ambientLight = new THREE.AmbientLight(0x777777);
-            scene.add(ambientLight);
-
-            const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight1.position.set(1, 1, 1).normalize();
-            scene.add(dirLight1);
-
-            const dirLight2 = new THREE.DirectionalLight(0x555555, 0.5);
-            dirLight2.position.set(-1, -1, -1).normalize();
-            scene.add(dirLight2);
-
-            function base64ToArrayBuffer(base64) {
-                var binary_string = window.atob(base64);
-                var len = binary_string.length;
-                var bytes = new Uint8Array(len);
-                for (var i = 0; i < len; i++) {
-                    bytes[i] = binary_string.charCodeAt(i);
-                }
-                return bytes.buffer;
-            }
-
-            let initialCameraPos = null;
-
-            try {
-                const loader = new THREE.STLLoader();
-                const arrayBuffer = base64ToArrayBuffer("$b64_stl");
-                const geometry = loader.parse(arrayBuffer);
-
-                geometry.center();
-                geometry.computeVertexNormals();
-
-                const material = new THREE.MeshStandardMaterial({
-                    color: 0x2196F3,
-                    roughness: 0.3,
-                    metalness: 0.2
-                });
-                const mesh = new THREE.Mesh(geometry, material);
-                scene.add(mesh);
-
-                geometry.computeBoundingSphere();
-                const radius = geometry.boundingSphere.radius;
-                camera.position.set(radius * 2.2, radius * 2.2, radius * 2.2);
-                camera.lookAt(0, 0, 0);
-                controls.update();
-                initialCameraPos = camera.position.clone();
-
-                loading.style.display = 'none';
-            } catch (err) {
-                loading.innerText = 'Failed to load 3D preview';
-                console.error(err);
-            }
-
-            document.getElementById('btn-zoom-in').addEventListener('click', function () {
-                camera.position.multiplyScalar(0.8);
-                controls.update();
-            });
-            document.getElementById('btn-zoom-out').addEventListener('click', function () {
-                camera.position.multiplyScalar(1.25);
-                controls.update();
-            });
-            document.getElementById('btn-reset').addEventListener('click', function () {
-                if (initialCameraPos) {
-                    camera.position.copy(initialCameraPos);
-                    controls.target.set(0, 0, 0);
-                    controls.update();
-                }
-            });
-
-            function animate() {
-                requestAnimationFrame(animate);
-                controls.update();
-                renderer.render(scene, camera);
-            }
-            animate();
-        </script>
-    </body>
-    </html>
-    """)
-
-    def render_3d_viewer(mesh_obj):
-        try:
-            if isinstance(mesh_obj, trimesh.PointCloud) or len(mesh_obj.vertices) == 0:
-                return None
-            stl_bytes = mesh_obj.export(file_type='stl')
-            b64_stl = base64.b64encode(stl_bytes).decode('utf-8')
-            return HTML_TEMPLATE.substitute(b64_stl=b64_stl)
-        except Exception:
-            return None
 
     uploaded_file = st.file_uploader(
         t["file_uploader"],
