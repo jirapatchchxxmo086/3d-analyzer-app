@@ -114,6 +114,7 @@ def estimate_3d_print_hours(
     technology: str = "FDM",
     hours_per_cm3: Optional[float] = None,
     shell_fraction: Optional[float] = None,
+    surface_area_sqm: Optional[float] = None,
 ) -> MachiningEstimate:
     p = FDM_PRINT_DEFAULTS
 
@@ -135,23 +136,28 @@ def estimate_3d_print_hours(
         )
 
     # -------------------------------------------------------------
-    # FDM Dynamic Rate Scaling (Non-linear for Large Scale Models)
+    # Calibrated Multi-Parametric FDM Estimator
     # -------------------------------------------------------------
-    base_rate = hours_per_cm3 or p["hours_per_cm3"]
     vol = max(volume_cm3, 0)
+    area_sqm = max(surface_area_sqm, 0) if surface_area_sqm is not None else 0.0
 
-    # ใช้สูตรสเกลอัตราลดทอน (Diminishing Return) เมื่อปริมาตร > 15,000 cm3 (จำลองการใช้ High Flow Nozzle)
-    if vol > 15000:
-        base_hrs = 15000 * base_rate
-        extra_vol = vol - 15000
-        # สเกลปรับลดอัตราสำหรับปริมาตรส่วนเกิน
-        extra_hrs = (extra_vol ** 0.55) * 0.237
-        total_hours = base_hrs + extra_hrs
+    if area_sqm > 0 and vol > 0:
+        # ใช้สมการแยกคำนวณจาก Surface Area (Outer Shell) + Volume (Infill Structure)
+        shell_hours = (area_sqm ** 1.1) * 285.0
+        infill_hours = (vol * (infill_pct / 20.0)) * 0.0031
+        total_hours = shell_hours + infill_hours
     else:
-        total_hours = vol * base_rate
+        # Fallback Calculation หากไม่มีการส่งค่า surface_area_sqm มา
+        base_rate = hours_per_cm3 or p["hours_per_cm3"]
+        if vol <= 20000:
+            total_hours = vol * 0.0085
+        else:
+            base_hrs = 20000 * 0.0085
+            extra_vol = vol - 20000
+            total_hours = base_hrs + ((extra_vol ** 0.55) * 0.237)
 
     total_hours = max(total_hours, p["min_job_hours"])
-    effective_rate = total_hours / vol if vol > 0 else base_rate
+    effective_rate = total_hours / vol if vol > 0 else (hours_per_cm3 or p["hours_per_cm3"])
 
     return MachiningEstimate(
         hours=round(total_hours, 2),
@@ -159,6 +165,6 @@ def estimate_3d_print_hours(
             "technology": technology,
             "effective_volume_cm3": round(vol, 2),
             "rate_used_hours_per_cm3": round(effective_rate, 6),
-            "hours_per_cm3": round(effective_rate, 6),  # ส่งอัตราเฉลี่ยจริงแสดงในหน้าเว็บ
+            "hours_per_cm3": round(effective_rate, 6),
         },
     )
