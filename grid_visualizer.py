@@ -7,15 +7,25 @@ import streamlit as st
 def get_submeshes(mesh):
     """
     แยกชิ้นส่วนของโมเดล (Connected Components) 
+    รองรับทั้งกรณีที่ trimesh.split() คืนค่าเป็น list หรือ numpy.ndarray
     """
     if mesh is None or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
         return []
     
-    submeshes = mesh.split(only_watertight=False)
-    if not submeshes:
+    raw_submeshes = mesh.split(only_watertight=False)
+    
+    # แปลงผลลัพธ์ให้อยู่ในรูปแบบ Python List เสมอเพื่อความปลอดภัย (แก้ Bug 1 & 2)
+    if isinstance(raw_submeshes, np.ndarray):
+        submeshes = raw_submeshes.tolist()
+    elif isinstance(raw_submeshes, (list, tuple)):
+        submeshes = list(raw_submeshes)
+    else:
+        submeshes = []
+
+    if len(submeshes) == 0:
         submeshes = [mesh]
         
-    # จัดเรียงตามปริมาตร/ขนาด จากใหญ่ไปเล็ก
+    # จัดเรียงตามปริมาตร/ขนาด จากใหญ่ไปเล็ก (ใช้งาน .sort(key=...) ได้แน่นอนแล้ว)
     submeshes.sort(key=lambda m: m.extents.prod(), reverse=True)
     return submeshes
 
@@ -25,11 +35,11 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
     submeshes = get_submeshes(mesh)
     st.session_state["submesh_count"] = len(submeshes)
     
-    if submeshes:
+    if len(submeshes) > 0:
         n_items = len(submeshes)
         cols = math.ceil(math.sqrt(n_items))
         
-        # 1. คำนวณขนาด Bounding Box ของชิ้นส่วนที่ใหญ่ที่สุด เพื่อใช้ตั้งระยะ Grid Spacing ให้พอดี
+        # 1. คำนวณขนาด Bounding Box ของชิ้นส่วนที่ใหญ่ที่สุด เพื่อตั้งระยะ Spacing ให้พอดี
         max_dx = max([m.extents[0] for m in submeshes])
         max_dy = max([m.extents[1] for m in submeshes])
         
@@ -59,7 +69,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
             vertices = submesh.vertices - local_center
             vertices[:, 0] += grid_center_x
             vertices[:, 1] += grid_center_y
-            vertices[:, 2] += (bounds[1][2] - bounds[0][2]) / 2.0  # ให้วางอยู่บนระดับ Z=0
+            vertices[:, 2] += (bounds[1][2] - bounds[0][2]) / 2.0  # วางบนระดับ Z=0
             
             faces = submesh.faces
             
@@ -74,7 +84,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
                 color='#1E3A8A', # Navy Blue
                 opacity=0.95,
                 name=f"ชิ้นส่วน {idx + 1}",
-                showlegend=False, # ปิด Legend รายชิ้นเพื่อไม่ให้บังหน้าจอ
+                showlegend=False, # ซ่อน Legend เพื่อไม่ให้บังพื้นที่วางกราฟ
                 flatshading=True,
                 lighting=dict(ambient=0.5, diffuse=0.8, roughness=0.3)
             ))
