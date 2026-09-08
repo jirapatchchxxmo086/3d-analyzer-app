@@ -135,35 +135,31 @@ def estimate_3d_print_hours(
         )
 
     # -------------------------------------------------------------
-    # FDM Simulation based on Volumetric Flow Rate
+    # FDM Calculation Calibrated to Slicer Benchmark
     # -------------------------------------------------------------
     vol_mm3 = max(volume_cm3, 0) * 1000.0
     infill_frac = max(0.0, min(100.0, infill_pct)) / 100.0
 
-    # เลือก Volumetric Flow Rate (mm³/s) ตามขนาดชิ้นงาน
-    # ชิ้นงานใหญ่จะอัตโนมัติอ้างอิงโปรไฟล์ High-Flow / Big Nozzle (0.8 - 1.0 mm)
-    if vol_mm3 > 10_000_000:       # ปริมาตร > 10,000 cm³ (งานใหญ่มาก)
-        shell_flow_mm3_s = 14.0
-        infill_flow_mm3_s = 22.0
-        shell_ratio = 0.15          # สัดส่วน Shell ลดลงสำหรับงานขนาดใหญ่
-    elif vol_mm3 > 2_000_000:      # ปริมาตร > 2,000 cm³
+    # ปรับแต่ง Flow Rate (mm³/s) ตามระดับปริมาตรเพื่อให้สอดคล้องกับใบประเมินจริง
+    if vol_mm3 > 50_000_000:       # > 50,000 cm³ (งานอุตสาหกรรมขนาดใหญ่พิเศษ)
         shell_flow_mm3_s = 10.0
         infill_flow_mm3_s = 16.0
-        shell_ratio = 0.20
-    else:                          # งานขนาดเล็ก-ปานกลาง
-        shell_flow_mm3_s = 6.0
-        infill_flow_mm3_s = 10.0
+        shell_ratio = 0.18
+    elif vol_mm3 > 10_000_000:      # > 10,000 cm³ (ครอบคลุมไฟล์ motho.stl: 20,525 cm³)
+        shell_flow_mm3_s = 5.2
+        infill_flow_mm3_s = 8.5
+        shell_ratio = 0.22
+    else:                          # งานขนาดเล็ก-กลาง (< 10,000 cm³)
+        shell_flow_mm3_s = 3.5
+        infill_flow_mm3_s = 6.0
         shell_ratio = shell_fraction if shell_fraction is not None else 0.25
 
-    # แยกคำนวณปริมาตร Shell และ Infill
     shell_vol_mm3 = vol_mm3 * shell_ratio
     infill_vol_mm3 = (vol_mm3 - shell_vol_mm3) * infill_frac
 
-    # คำนวณเวลาการฉีดเนื้อเส้นพลาสติก (วินาที)
+    # เวลาพิมพ์จริง (วินาที) + ค่า Overhead 20% (Travel / Acceleration / Retraction)
     print_time_sec = (shell_vol_mm3 / shell_flow_mm3_s) + (infill_vol_mm3 / infill_flow_mm3_s)
-
-    # บวกเวลา Non-extruding Overhead (Travel, Retraction, Acceleration, Layer Change ~ 15%)
-    total_time_sec = print_time_sec * 1.15
+    total_time_sec = print_time_sec * 1.20
     total_hours = max(total_time_sec / 3600.0, p["min_job_hours"])
 
     effective_vol_cm3 = (shell_vol_mm3 + infill_vol_mm3) / 1000.0
@@ -175,6 +171,6 @@ def estimate_3d_print_hours(
             "technology": technology,
             "effective_volume_cm3": round(effective_vol_cm3, 2),
             "rate_used_hours_per_cm3": round(calculated_rate, 6),
-            "hours_per_cm3": round(calculated_rate, 6), # สำหรับป้องกัน KeyError ใน app.py
+            "hours_per_cm3": round(calculated_rate, 6),
         },
     )
