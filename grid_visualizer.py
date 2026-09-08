@@ -21,7 +21,7 @@ def get_submeshes(mesh):
     submeshes.sort(key=lambda m: m.extents.prod(), reverse=True)
     return submeshes
 
-def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_thickness_mm=75.0, mesh=None, slice_mode="modular"):
+def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_thickness_mm=75.0, mesh=None, slice_mode="planar"):
     fig = go.Figure()
 
     if slice_mode == "planar":
@@ -30,6 +30,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
             bounds = mesh.bounds
             center = (bounds[0] + bounds[1]) / 2.0
             
+            # ย้ายจุดศูนย์กลางมาที่ Center (X, Y) และวางฐานไว้ที่ Z=0
             vertices[:, 0] -= center[0]
             vertices[:, 1] -= center[1]
             vertices[:, 2] -= bounds[0][2]
@@ -84,8 +85,8 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
             
             max_dx = max([m.extents[0] for m in submeshes])
             max_dy = max([m.extents[1] for m in submeshes])
-            spacing_x = max_dx * 1.25 if max_dx > 0 else 500.0
-            spacing_y = max_dy * 1.25 if max_dy > 0 else 500.0
+            spacing_x = max_dx * 1.2 spacing_x if max_dx > 0 else 500.0
+            spacing_y = max_dy * 1.2 if max_dy > 0 else 500.0
             
             rows = math.ceil(n_items / cols)
             start_x = -((cols - 1) * spacing_x) / 2.0
@@ -131,15 +132,19 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
                     hoverinfo='text', text=f"ก้อนโฟมชิ้นที่ {idx+1}<br>ขนาด: {sx:.0f} x {sy:.0f} x {sz:.0f} mm"
                 ))
 
+    # ปรับแต่งกล้องและสัดส่วนให้ซูมเข้าพอดีชิ้นงาน และหมุนขยับได้ลื่นไหล
     fig.update_layout(
         scene=dict(
             xaxis=dict(title='X (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
             yaxis=dict(title='Y (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
             zaxis=dict(title='Z (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
-            aspectmode='data',
-            camera=dict(eye=dict(x=1.5, y=1.5, z=1.2))
+            aspectmode='cube',  # ปรับสัดส่วนเป็นลูกบาศก์เพื่อให้ขยับและหมุนดูง่าย
+            camera=dict(
+                eye=dict(x=1.25, y=1.25, z=0.88),  # ขยับกล้องให้อยู่ใกล้ตัวชิ้นงานมากขึ้น
+                center=dict(x=0, y=0, z=0)
+            )
         ),
-        margin=dict(l=0, r=0, b=0, t=20),
+        margin=dict(l=0, r=0, b=0, t=10),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)'
     )
