@@ -85,7 +85,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
             
             max_dx = max([m.extents[0] for m in submeshes])
             max_dy = max([m.extents[1] for m in submeshes])
-            spacing_x = max_dx * 1.2 spacing_x if max_dx > 0 else 500.0
+            spacing_x = max_dx * 1.2 if max_dx > 0 else 500.0
             spacing_y = max_dy * 1.2 if max_dy > 0 else 500.0
             
             rows = math.ceil(n_items / cols)
@@ -132,15 +132,15 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
                     hoverinfo='text', text=f"ก้อนโฟมชิ้นที่ {idx+1}<br>ขนาด: {sx:.0f} x {sy:.0f} x {sz:.0f} mm"
                 ))
 
-    # ปรับแต่งกล้องและสัดส่วนให้ซูมเข้าพอดีชิ้นงาน และหมุนขยับได้ลื่นไหล
+    # ปรับแต่งกล้องและสัดส่วนให้ซูมเข้าพอดีชิ้นงาน และหมุนปรับมุมมองได้ง่ายขึ้น
     fig.update_layout(
         scene=dict(
             xaxis=dict(title='X (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
             yaxis=dict(title='Y (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
             zaxis=dict(title='Z (mm)', backgroundcolor='#FAF8F5', gridcolor='#E2D9CE', showbackground=True),
-            aspectmode='cube',  # ปรับสัดส่วนเป็นลูกบาศก์เพื่อให้ขยับและหมุนดูง่าย
+            aspectmode='cube',
             camera=dict(
-                eye=dict(x=1.25, y=1.25, z=0.88),  # ขยับกล้องให้อยู่ใกล้ตัวชิ้นงานมากขึ้น
+                eye=dict(x=1.25, y=1.25, z=0.88),
                 center=dict(x=0, y=0, z=0)
             )
         ),
