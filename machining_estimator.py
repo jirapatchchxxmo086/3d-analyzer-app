@@ -47,12 +47,9 @@ def estimate_foam_cnc_hours(
     surface_area_sqm: float,
     complexity_level: int,
     machine_name: str = "Robot_Foam",
-    wall_thickness_mm: float = 75.0,  # ความหนาเปลือกโฟมสำหรับงานโปร่ง (50-100 mm)
-    auto_hollow_threshold_cm3: float = 1_000_000.0, # ปริมาตรเกิน 1 ลบ.ม. จะใช้เทคนิค Hollow
+    wall_thickness_mm: float = 75.0,
+    auto_hollow_threshold_cm3: float = 1_000_000.0,
 ) -> MachiningEstimate:
-    """
-    ประเมินชั่วโมง Foam CNC พร้อมระบบคำนวณแบบ Hollow Shell + Segmented Auto-Optimization
-    """
     if machine_name not in FOAM_CNC_MACHINES:
         machine_name = "Robot_Foam"
     
@@ -61,25 +58,18 @@ def estimate_foam_cnc_hours(
     finish = machine["processes"]["finishing"]
     complexity_level = max(1, min(10, complexity_level))
 
-    # -------------------------------------------------------------
-    # 🌟 Auto Smart Adjustment: งานขนาดใหญ่เกิน 1 ลบ.ม. (Large Scale)
-    # -------------------------------------------------------------
     actual_roughing_vol_cm3 = volume_removal_cm3
     is_large_scale_hollow = False
 
     if volume_removal_cm3 > auto_hollow_threshold_cm3 and surface_area_sqm > 0:
         is_large_scale_hollow = True
-        # คำนวณปริมาตรโฟมจริงจากการสร้าง Shell เปลือกนอกความหนา wall_thickness_mm
         shell_thickness_m = wall_thickness_mm / 1000.0
         estimated_shell_volume_cm3 = (surface_area_sqm * shell_thickness_m) * 1_000_000.0
-        
-        # ปริมาตรที่ต้องกัดหยาบออกจริงจะคิดเฉพาะส่วนเผื่อขอบนอกของแต่ละชิ้นย่อย (~30% ของปริมาตรเปลือก)
         actual_roughing_vol_cm3 = estimated_shell_volume_cm3 * 0.30
 
     volume_removal_mm3 = max(actual_roughing_vol_cm3, 0) * 1000.0
     surface_area_mm2 = max(surface_area_sqm, 0) * 1_000_000.0
 
-    # 1. Roughing Time Calculation
     stepover_rough_mm = rough["tool_diameter_mm"] * rough["stepover_ratio"]
     stepdown_mm = rough["stepdown_mm"]
     roughing_path_mm = (
@@ -89,7 +79,6 @@ def estimate_foam_cnc_hours(
     rough_feed = min(rough["recommended_feed_mm_min"], machine["max_feed_rate_mm_min"]) * machine["efficiency_factor"]
     roughing_time_min = (roughing_path_mm / rough_feed * rough["safety_margin"]) if rough_feed > 0 else 0.0
 
-    # 2. Finishing Time Calculation
     finish_tool_mm = finish["max_tool_diameter_mm"] - (
         finish["max_tool_diameter_mm"] - finish["min_tool_diameter_mm"]
     ) * (complexity_level - 1) / 9.0
@@ -113,42 +102,33 @@ def estimate_foam_cnc_hours(
         },
     )
 
-
 def estimate_3d_print_hours(
     volume_cm3: float,
-    infill_pct: float = 20,
+    infill_pct: float = 20.0,
+    technology: str = "FDM",
     hours_per_cm3: Optional[float] = None,
     shell_fraction: Optional[float] = None,
 ) -> MachiningEstimate:
-    """ประเมินชั่วโมง 3D Print FDM"""
     p = FDM_PRINT_DEFAULTS
-    hours_per_cm3 = hours_per_cm3 or p["hours_per_cm3"]
-    shell_fraction = shell_fraction if shell_fraction is not None else p["shell_fraction"]
+    
+    if technology == "SLA":
+        base_rate = 0.10
+    elif technology == "SLR":
+        base_rate = 0.12
+    else:
+        base_rate = hours_per_cm3 or p["hours_per_cm3"]
 
+    shell_frac = shell_fraction if shell_fraction is not None else p["shell_fraction"]
     infill_fraction = max(0.0, min(100.0, infill_pct)) / 100.0
-    effective_volume_cm3 = max(volume_cm3, 0) * (shell_fraction + (1 - shell_fraction) * infill_fraction)
-
-    total_hours = max(effective_volume_cm3 * hours_per_cm3, p["min_job_hours"])
+    
+    effective_volume_cm3 = max(volume_cm3, 0) * (shell_frac + (1.0 - shell_frac) * infill_fraction)
+    total_hours = max(effective_volume_cm3 * base_rate, p["min_job_hours"])
 
     return MachiningEstimate(
         hours=round(total_hours, 2),
         breakdown={
+            "technology": technology,
             "effective_volume_cm3": round(effective_volume_cm3, 2),
-            "hours_per_cm3": hours_per_cm3,
+            "rate_used_hours_per_cm3": base_rate,
         },
-    )
-def estimate_3d_print_hours(volume_cm3, technology="FDM"):
-    """
-    คำนวณเวลาพิมพ์ 3D พิมพ์คร่าวๆ (ชั่วโมง)
-    """
-    if technology == "FDM":
-        hrs = round(volume_cm3 * 0.15, 2)
-    elif technology == "SLA":
-        hrs = round(volume_cm3 * 0.10, 2)
-    else:
-        hrs = round(volume_cm3 * 0.12, 2)
-
-    return MachiningEstimate(
-        hours=hrs,
-        breakdown={"effective_volume_cm3": volume_cm3, "technology": technology}
     )
