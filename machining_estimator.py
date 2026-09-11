@@ -14,17 +14,14 @@ FOAM_CNC_MACHINES = {
         "min_job_hours": 0.50,
         "processes": {
             "roughing": {
-                "tool_diameter_mm": 20.0,
-                "stepover_ratio": 0.40,
-                "stepdown_mm": 12.0,
-                "recommended_feed_mm_min": 2500.0,
-                "safety_margin": 1.25,
+                "mrr_cm3_per_min": 180.0,  # อัตราการกัดโฟมอัตโนมัติ (180 cm³/นาที)
+                "safety_margin": 1.15,
             },
             "finishing": {
                 "min_tool_diameter_mm": 6.0,
                 "max_tool_diameter_mm": 20.0,
-                "stepover_ratio": 0.12,
-                "recommended_feed_mm_min": 2000.0,
+                "stepover_ratio": 0.15,
+                "recommended_feed_mm_min": 2500.0,
                 "safety_margin": 1.20,
             },
         },
@@ -42,15 +39,16 @@ class MachiningEstimate:
     hours: float
     breakdown: Dict[str, Any]
 
+
 def estimate_foam_cnc_hours(
     volume_removal_cm3: float,
     surface_area_sqm: float,
     complexity_level: int,
     machine_name: str = "Robot_Foam",
     wall_thickness_mm: float = 75.0,
-    auto_hollow_threshold_cm3: float = 1_000_000.0,
+    auto_hollow_threshold_cm3: float = 100_000.0,  # ปรับ Threshold Hollow ลงเหลือ 100,000 cm³
 ) -> MachiningEstimate:
-    """คำนวณชั่วโมงเครื่องจักร Robot Foam CNC"""
+    """คำนวณชั่วโมงเครื่องจักร Robot Foam CNC ปรับแก้หน่วย Toolpath และ MRR"""
     if machine_name not in FOAM_CNC_MACHINES:
         machine_name = "Robot_Foam"
     
@@ -59,38 +57,35 @@ def estimate_foam_cnc_hours(
     finish = machine["processes"]["finishing"]
     complexity_level = max(1, min(10, complexity_level))
 
-    actual_roughing_vol_cm3 = volume_removal_cm3
+    vol_cm3 = max(volume_removal_cm3, 0.0)
+    area_sqm = max(surface_area_sqm, 0.0)
     is_large_scale_hollow = False
 
-    if volume_removal_cm3 > auto_hollow_threshold_cm3 and surface_area_sqm > 0:
+    # ถ้างามมีปริมาตรใหญ่เกินไป หุ่นโฟมจะโดน Hollow ข้างใน คิดเฉพาะความหนาเนื้อโฟม (Wall Thickness)
+    if vol_cm3 > auto_hollow_threshold_cm3 and area_sqm > 0:
         is_large_scale_hollow = True
         shell_thickness_m = wall_thickness_mm / 1000.0
-        estimated_shell_volume_cm3 = (surface_area_sqm * shell_thickness_m) * 1_000_000.0
-        actual_roughing_vol_cm3 = estimated_shell_volume_cm3 * 0.30
+        # คิดปริมาตรเนื้อโฟมจริงเฉพาะส่วนเปลือก
+        actual_roughing_vol_cm3 = (area_sqm * shell_thickness_m) * 1_000_000.0 * 0.50
+    else:
+        actual_roughing_vol_cm3 = vol_cm3
 
-    volume_removal_mm3 = max(actual_roughing_vol_cm3, 0) * 1000.0
-    surface_area_mm2 = max(surface_area_sqm, 0) * 1_000_000.0
+    # --- 1. Roughing Calculation (อิง Material Removal Rate: MRR) ---
+    complexity_rough_factor = 1.0 + (complexity_level - 1) * 0.05
+    mrr_effective = rough["mrr_cm3_per_min"] / complexity_rough_factor
+    roughing_time_min = (actual_roughing_vol_cm3 / mrr_effective) * rough["safety_margin"] if mrr_effective > 0 else 0.0
 
-    # --- Roughing ---
-    complexity_rough_factor = 1.0 + (complexity_level - 1) * 0.08
-    stepover_rough_mm = rough["tool_diameter_mm"] * rough["stepover_ratio"]
-    stepdown_mm = rough["stepdown_mm"]
-    
-    roughing_path_mm = (
-        (volume_removal_mm3 / (stepover_rough_mm * stepdown_mm)) * complexity_rough_factor
-        if stepover_rough_mm > 0 and stepdown_mm > 0 else 0.0
-    )
-    rough_feed = min(rough["recommended_feed_mm_min"], machine["max_feed_rate_mm_min"]) * machine["efficiency_factor"]
-    roughing_time_min = (roughing_path_mm / rough_feed * rough["safety_margin"]) if rough_feed > 0 else 0.0
-
-    # --- Finishing ---
+    # --- 2. Finishing Calculation (อิง Surface Area Toolpath) ---
     finish_tool_mm = finish["max_tool_diameter_mm"] - (
         finish["max_tool_diameter_mm"] - finish["min_tool_diameter_mm"]
     ) * (complexity_level - 1) / 9.0
     
-    complexity_finish_factor = 1.0 + (complexity_level - 1) * 0.12
+    complexity_finish_factor = 1.0 + (complexity_level - 1) * 0.10
     stepover_finish_mm = finish_tool_mm * finish["stepover_ratio"]
-    finishing_path_mm = (surface_area_mm2 / stepover_finish_mm * complexity_finish_factor) if stepover_finish_mm > 0 else 0.0
+    
+    surface_area_mm2 = area_sqm * 1_000_000.0
+    finishing_path_mm = (surface_area_mm2 / stepover_finish_mm) * complexity_finish_factor if stepover_finish_mm > 0 else 0.0
+    
     finish_feed = min(finish["recommended_feed_mm_min"], machine["max_feed_rate_mm_min"]) * machine["efficiency_factor"]
     finishing_time_min = (finishing_path_mm / finish_feed * finish["safety_margin"]) if finish_feed > 0 else 0.0
 
@@ -108,6 +103,7 @@ def estimate_foam_cnc_hours(
             "large_scale_hollow_applied": is_large_scale_hollow,
         },
     )
+
 
 def estimate_3d_print_hours(
     volume_cm3: float,
