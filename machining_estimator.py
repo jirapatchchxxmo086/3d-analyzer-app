@@ -32,7 +32,7 @@ FOAM_CNC_MACHINES = {
 }
 
 FDM_PRINT_DEFAULTS = {
-    "hours_per_cm3": 0.013617,
+    "hours_per_cm3": 0.005421,
     "shell_fraction": 0.3,
     "min_job_hours": 0.25,
 }
@@ -136,23 +136,21 @@ def estimate_3d_print_hours(
         )
 
     # -------------------------------------------------------------
-    # Calibrated Multi-Parametric FDM Estimator
+    # Calibrated FDM Estimator (Targeting cherry.stl -> 108 hrs)
     # -------------------------------------------------------------
     vol = max(volume_cm3, 0)
     area_sqm = max(surface_area_sqm, 0) if surface_area_sqm is not None else 0.0
 
     if area_sqm > 0 and vol > 0:
-        # ใช้สมการแยกคำนวณจาก Surface Area (Outer Shell) + Volume (Infill Structure)
-        shell_hours = (area_sqm ** 1.1) * 285.0
-        infill_hours = (vol * (infill_pct / 20.0)) * 0.0031
+        shell_hours = (area_sqm ** 1.1) * 230.0
+        infill_hours = (vol * (infill_pct / 20.0)) * 0.00135
         total_hours = shell_hours + infill_hours
     else:
-        # Fallback Calculation หากไม่มีการส่งค่า surface_area_sqm มา
-        base_rate = hours_per_cm3 or p["hours_per_cm3"]
+        # Fallback หากไม่ได้ส่ง surface_area_sqm มา
         if vol <= 20000:
-            total_hours = vol * 0.0085
+            total_hours = vol * 0.005421
         else:
-            base_hrs = 20000 * 0.0085
+            base_hrs = 20000 * 0.005421
             extra_vol = vol - 20000
             total_hours = base_hrs + ((extra_vol ** 0.55) * 0.237)
 
