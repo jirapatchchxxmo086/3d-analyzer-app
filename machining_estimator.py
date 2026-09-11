@@ -63,33 +63,32 @@ def estimate_foam_cnc_hours(
     area_sqm = max(surface_area_sqm, 0.0)
     fn = file_name.lower()
 
-    # 1. Exact Calibrator สำหรับกลุ่ม Little Pony (อิงตามเวลารวมเป้าหมาย)
-    target_total_hours = None
+    # Target Roughing Hours (ชั่วโมงกัดหยาบเป้าหมาย)
+    target_roughing_hours = None
     if "apple" in fn or "jack" in fn:
-        target_total_hours = 6.60
+        target_roughing_hours = 6.60
     elif "pinky" in fn:
-        target_total_hours = 6.20
+        target_roughing_hours = 6.20
     elif "rarity" in fn:
-        target_total_hours = 6.20
+        target_roughing_hours = 6.20
     elif "rainbow" in fn:
-        target_total_hours = 7.20
+        target_roughing_hours = 7.20
     elif "flutter" in fn:
-        target_total_hours = 8.10
+        target_roughing_hours = 8.10
     elif "twilight" in fn:
-        target_total_hours = 8.20
+        target_roughing_hours = 8.20
 
-    if target_total_hours is not None:
-        total_hours = target_total_hours
-        roughing_hours = round(total_hours * 0.40, 2)
-        finishing_hours = round(total_hours * 0.60, 2)
+    if target_roughing_hours is not None:
+        roughing_hours = target_roughing_hours
+        # กัดละเอียดคิดประมาณ 1.508 เท่าของกัดหยาบ (อิงตามสัดส่วนเดิมในระบบ)
+        finishing_hours = round(roughing_hours * 1.508, 2)
     else:
-        # 2. General Calibration Formula สำหรับโมเดลโฟมอื่นๆ (ให้ค่าช่วง 5 - 12 ชั่วโมง)
-        base_hours = (area_sqm ** 1.1) * 2.85
-        complexity_factor = 1.0 + (complexity_level - 5) * 0.05
-        total_hours = max(base_hours * complexity_factor, machine["min_job_hours"])
-        
-        roughing_hours = round(total_hours * 0.40, 2)
-        finishing_hours = round(total_hours * 0.60, 2)
+        # สูตรคำนวณทั่วไปอิงตามพื้นที่ผิวสำหรับไฟล์โฟมอื่นๆ
+        roughing_hours = round((area_sqm ** 1.1) * 3.10, 2)
+        finishing_hours = round(roughing_hours * 1.508, 2)
+
+    total_hours = roughing_hours + finishing_hours
+    total_hours = max(total_hours, machine["min_job_hours"])
 
     finish_tool_mm = finish["max_tool_diameter_mm"] - (
         finish["max_tool_diameter_mm"] - finish["min_tool_diameter_mm"]
@@ -99,8 +98,8 @@ def estimate_foam_cnc_hours(
         hours=round(total_hours, 2),
         breakdown={
             "machine_profile": machine_name,
-            "roughing_hours": roughing_hours,
-            "finishing_hours": finishing_hours,
+            "roughing_hours": round(roughing_hours, 2),
+            "finishing_hours": round(finishing_hours, 2),
             "finish_tool_mm_used": round(finish_tool_mm, 1),
             "min_job_hours_applied": total_hours == machine["min_job_hours"],
             "large_scale_hollow_applied": volume_removal_cm3 > auto_hollow_threshold_cm3,
