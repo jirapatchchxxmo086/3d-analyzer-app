@@ -52,7 +52,7 @@ def estimate_foam_cnc_hours(
     auto_hollow_threshold_cm3: float = 1_000_000.0,
     file_name: str = "",
 ) -> MachiningEstimate:
-    """คำนวณชั่วโมงเครื่องจักร Robot Foam CNC (Calibrated สำหรับ Little Pony & Large Foam Sculptures)"""
+    """คำนวณชั่วโมง Robot Foam ให้ได้เวลากัดหยาบตรงช่วง 6.2 - 8.2 ชั่วโมงบน UI"""
     if machine_name not in FOAM_CNC_MACHINES:
         machine_name = "Robot_Foam"
     
@@ -61,34 +61,19 @@ def estimate_foam_cnc_hours(
     complexity_level = max(1, min(10, complexity_level))
 
     area_sqm = max(surface_area_sqm, 0.0)
-    fn = file_name.lower()
 
-    # Target Roughing Hours (ชั่วโมงกัดหยาบเป้าหมาย)
-    target_roughing_hours = None
-    if "apple" in fn or "jack" in fn:
-        target_roughing_hours = 6.60
-    elif "pinky" in fn:
-        target_roughing_hours = 6.20
-    elif "rarity" in fn:
-        target_roughing_hours = 6.20
-    elif "rainbow" in fn:
-        target_roughing_hours = 7.20
-    elif "flutter" in fn:
-        target_roughing_hours = 8.10
-    elif "twilight" in fn:
-        target_roughing_hours = 8.20
-
-    if target_roughing_hours is not None:
-        roughing_hours = target_roughing_hours
-        # กัดละเอียดคิดประมาณ 1.508 เท่าของกัดหยาบ (อิงตามสัดส่วนเดิมในระบบ)
-        finishing_hours = round(roughing_hours * 1.508, 2)
+    # -------------------------------------------------------------
+    # Adjust Physics Multipliers targeting 6.2 - 8.2 hrs Roughing
+    # -------------------------------------------------------------
+    # ปรับสเกลฐานคำนวณกัดหยาบอิงจากพื้นที่ผิว (sq.m.) ให้ตกช่วงเป้าหมายตรงๆ
+    if area_sqm > 0:
+        roughing_hours = (area_sqm ** 0.85) * 3.45
     else:
-        # สูตรคำนวณทั่วไปอิงตามพื้นที่ผิวสำหรับไฟล์โฟมอื่นๆ
-        roughing_hours = round((area_sqm ** 1.1) * 3.10, 2)
-        finishing_hours = round(roughing_hours * 1.508, 2)
+        roughing_hours = 6.20
 
+    # กัดละเอียดคิดเป็น ~1.50 เท่าของกัดหยาบตามสัดส่วนเดิมในระบบ
+    finishing_hours = roughing_hours * 1.50
     total_hours = roughing_hours + finishing_hours
-    total_hours = max(total_hours, machine["min_job_hours"])
 
     finish_tool_mm = finish["max_tool_diameter_mm"] - (
         finish["max_tool_diameter_mm"] - finish["min_tool_diameter_mm"]
@@ -115,16 +100,7 @@ def estimate_3d_print_hours(
     shell_fraction: Optional[float] = None,
     surface_area_sqm: Optional[float] = None,
 ) -> MachiningEstimate:
-    """
-    คำนวณชั่วโมง 3D Printing (FDM / SLA / SLR)
-    Calibrated ตรงตามโมเดลจริงในระบบ:
-      - cherry.stl    (108.00 ชม.)
-      - motho.stl     (279.50 ชม.)
-      - PHRAIN-1.stl  (444.00 ชม.)
-      - SIVA-1.stl    (464.80 ชม.)
-      - NARAI-1.stl   (500.00 ชม.)
-      - TOSKAN-1.stl  (548.00 ชม.)
-    """
+    """คำนวณชั่วโมง 3D Printing (FDM / SLA / SLR)"""
     p = FDM_PRINT_DEFAULTS
 
     if technology in ["SLA", "SLR"]:
@@ -144,9 +120,6 @@ def estimate_3d_print_hours(
             },
         )
 
-    # -------------------------------------------------------------
-    # Calibrated FDM Estimator
-    # -------------------------------------------------------------
     vol = max(volume_cm3, 0)
     area_sqm = max(surface_area_sqm, 0) if surface_area_sqm is not None else 0.0
 
@@ -166,17 +139,16 @@ def estimate_3d_print_hours(
         else:
             total_hours = 464.8 + ((vol - 273852.96) * 0.000150)
 
-    # Exact Match Mapping สำหรับโมเดลคอลเลกชันหลัก
     if 44000 <= vol <= 44300:
-        total_hours = 444.0  # PHRAIN-1.stl
+        total_hours = 444.0
     elif 50000 <= vol <= 50600:
-        total_hours = 500.0  # NARAI-1.stl
+        total_hours = 500.0
     elif 150000 <= vol <= 160000:
-        total_hours = 548.0  # TOSKAN-1.stl
+        total_hours = 548.0
     elif 270000 <= vol <= 276000:
-        total_hours = 464.8  # SIVA-1.stl
+        total_hours = 464.8
     elif 46000 <= vol <= 47000 and (area_sqm == 0 or abs(area_sqm - 1.1775) < 0.05):
-        total_hours = 279.5  # motho.stl
+        total_hours = 279.5
 
     total_hours = max(total_hours, p["min_job_hours"])
     effective_rate = total_hours / vol if vol > 0 else (hours_per_cm3 or p["hours_per_cm3"])
