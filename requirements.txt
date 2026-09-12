@@ -1,6 +1,7 @@
-streamlit>=1.30.0
+streamlit==1.38.0
 trimesh>=4.0.0
-numpy>=1.24.0
+numpy<2.0.0
 pandas>=2.0.0
-scipy>=1.10.0
-plotly>=5.18.0
+pyarrow<25.0.0
+pillow
+openpyxl
