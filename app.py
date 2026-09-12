@@ -966,11 +966,13 @@ elif page == t["page_2_name"]:
                         surface_area_sqm=per_piece_area,
                         complexity_level=complexity_level,
                     )
-                    suggested_rough = machining_result.breakdown["roughing_hours"]
-                    suggested_finish = machining_result.breakdown["finishing_hours"]
+                    suggested_rough = machining_result.breakdown.get("roughing_hours", 0.0)
+                    suggested_finish = machining_result.breakdown.get("finishing_hours", 0.0)
+                    finish_tool_mm = machining_result.breakdown.get("finish_tool_mm_used", 6.0)
+
                     st.caption(
                         f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น "
-                        f"(ดอก finishing {machining_result.breakdown['finish_tool_mm_used']} มม.)"
+                        f"(ดอก finishing {finish_tool_mm} มม.)"
                     )
                     op_qty_rough = st.number_input(
                         "ชั่วโมงกัดหยาบ (Roughing)" if lang == "TH" else "Roughing hours",
