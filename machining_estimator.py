@@ -25,7 +25,7 @@ def estimate_foam_cnc_hours(
     machine_name: str = "Robot_Foam",
 ) -> MachiningEstimate:
     """
-    คำนวณชั่วโมง Robot Foam CNC
+    คำนวณชั่วโมง Robot Foam CNC 
     """
     area_sqm = max(surface_area_sqm, 0.0)
     
@@ -50,6 +50,9 @@ def estimate_foam_cnc_hours(
     roughing_hrs = round(effective_machine_hours * 0.4, 2)
     finishing_hrs = round(effective_machine_hours * 0.6, 2)
 
+    # เลือกขนาดดอก Finishing อัตโนมัติตาม Complexity
+    finish_tool_mm = 6.0 if complexity_level >= 4 else 10.0
+
     return MachiningEstimate(
         hours=round(total_time, 2),
         breakdown={
@@ -58,6 +61,7 @@ def estimate_foam_cnc_hours(
             "machine_hours": round(effective_machine_hours, 2),
             "roughing_hours": roughing_hrs,
             "finishing_hours": finishing_hrs,
+            "finish_tool_mm_used": finish_tool_mm,
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
             "parts_count": 1,
@@ -106,6 +110,7 @@ def estimate_3d_print_hours(
             "machine_hours": round(machine_hours, 2),
             "roughing_hours": 0.0,
             "finishing_hours": round(machine_hours, 2),
+            "finish_tool_mm_used": 0.4,
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
             "parts_count": 1,
