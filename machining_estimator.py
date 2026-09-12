@@ -5,7 +5,7 @@ machining_estimator.py
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import math
 
 
@@ -19,28 +19,34 @@ def estimate_foam_cnc_hours(
     volume_removal_cm3: float = 0.0,
     surface_area_sqm: float = 0.0,
     complexity_level: int = 3,
-    setup_hours_override: float = None,
+    setup_hours_override: Optional[float] = None,
     height_mm: float = 1000.0,
     allow_anatomical_split: bool = True,
     machine_name: str = "Robot_Foam",
 ) -> MachiningEstimate:
+    """
+    คำนวณชั่วโมง Robot Foam CNC
+    """
     area_sqm = max(surface_area_sqm, 0.0)
     
     if area_sqm == 0.0 and volume_removal_cm3 > 0.0:
         area_sqm = ((volume_removal_cm3 / 1_000_000.0) ** (2.0 / 3.0)) * 6.0
 
-    # Base Rate
+    # 1. Base Machine Rate
     base_rate = 3.10 + (complexity_level * 0.15)
     base_machine_hours = area_sqm * base_rate
 
-    # Program & Setup Time
+    # 2. Program & Setup Time
     program_hours = 0.2
-    setup_hours = setup_hours_override if setup_hours_override is not None else (1.0 if area_sqm < 2.0 else 0.5)
+    if setup_hours_override is not None:
+        setup_hours = setup_hours_override
+    else:
+        setup_hours = 1.0 if area_sqm < 2.0 else 0.5
 
     effective_machine_hours = base_machine_hours
     total_time = effective_machine_hours + program_hours + setup_hours
 
-    # แยกสัดส่วน Roughing / Finishing จาก Machine Hours เพื่อรองรับ app.py
+    # แยกสัดส่วน Roughing / Finishing สำหรับ UI
     roughing_hrs = round(effective_machine_hours * 0.4, 2)
     finishing_hrs = round(effective_machine_hours * 0.6, 2)
 
@@ -50,10 +56,12 @@ def estimate_foam_cnc_hours(
             "machine_type": "Robot CNC (Foam)",
             "surface_area_sqm": round(area_sqm, 2),
             "machine_hours": round(effective_machine_hours, 2),
-            "roughing_hours": roughing_hrs,      # <-- เพิ่ม Key นี้
-            "finishing_hours": finishing_hrs,    # <-- เพิ่ม Key นี้
+            "roughing_hours": roughing_hrs,
+            "finishing_hours": finishing_hrs,
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
+            "parts_count": 1,
+            "assembly_labor_hours": 0.0,
             "effective_rate_hr_sqm": round(base_rate, 2),
             "hourly_rate_baht": 300,
         },
@@ -67,6 +75,9 @@ def estimate_3d_print_hours(
     complexity_level: int = 4,
     technology: str = "FDM",
 ) -> MachiningEstimate:
+    """
+    คำนวณชั่วโมง 3D Print FDM
+    """
     area_sqm = max(surface_area_sqm, 0.0)
 
     if area_sqm == 0.0 and volume_cm3 > 0.0:
@@ -93,10 +104,12 @@ def estimate_3d_print_hours(
             "machine_type": "3D Print FDM",
             "surface_area_sqm": round(area_sqm, 2),
             "machine_hours": round(machine_hours, 2),
-            "roughing_hours": 0.0,                             # <-- เพิ่ม Key นี้ (3D Print ไม่มี Roughing)
-            "finishing_hours": round(machine_hours, 2),        # <-- เพิ่ม Key นี้
+            "roughing_hours": 0.0,
+            "finishing_hours": round(machine_hours, 2),
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
+            "parts_count": 1,
+            "assembly_labor_hours": 0.0,
             "effective_rate_hr_sqm": round(rate_per_sqm, 1),
             "hourly_rate_baht": 50,
         },
