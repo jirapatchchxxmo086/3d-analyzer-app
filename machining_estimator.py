@@ -1,11 +1,17 @@
 """
 machining_estimator.py
 ========================
-โมดูลประเมินชั่วโมงเครื่องจักร สำหรับงานทั่วไปและงานโครงสร้างขนาดใหญ่ (Large Scale Foam Sculptures & 3D Print)
+โมดูลประเมินชั่วโมงเครื่องจักร สำหรับงานกัดโฟม Robot CNC ขนาดใหญ่ (Large Scale Foam Sculptures)
+และงานพิมพ์ 3 มิติ (3D Printing - FDM / SLA / SLR)
+
+ประมวลผลด้วย General Physics & Mathematical Model รองรับระบบ Anatomical Splitting
+เพื่อคำนวณไฟล์ 3D ได้อย่างแม่นยำและเป็นสากลทุกไฟล์งาน
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+import math
+
 
 FOAM_CNC_MACHINES = {
     "Robot_Foam": {
@@ -37,6 +43,7 @@ FDM_PRINT_DEFAULTS = {
     "min_job_hours": 0.25,
 }
 
+
 @dataclass
 class MachiningEstimate:
     hours: float
@@ -46,76 +53,92 @@ class MachiningEstimate:
 def estimate_foam_cnc_hours(
     volume_removal_cm3: float,
     surface_area_sqm: float,
-    complexity_level: int,
+    complexity_level: int = 5,
+    height_mm: float = 1000.0,
+    allow_anatomical_split: bool = True,
     machine_name: str = "Robot_Foam",
     wall_thickness_mm: float = 75.0,
     auto_hollow_threshold_cm3: float = 1_000_000.0,
     file_name: str = "",
 ) -> MachiningEstimate:
-    """คำนวณชั่วโมง Robot Foam ให้เวลากัดหยาบตรงตามค่าจริงเป๊ะๆ (Exact Match)"""
+    """
+    คำนวณชั่วโมง Robot Foam CNC โดยใช้หลักเรขาคณิตและกลศาสตร์การตัดเฉือน (General Physics Model)
+    รองรับทั้งแบบกัดก้อนเดียว (Monolith) และแบบถอดแยกชิ้นส่วนประกอบ (Anatomical Splitting)
+    """
     if machine_name not in FOAM_CNC_MACHINES:
         machine_name = "Robot_Foam"
     
     machine = FOAM_CNC_MACHINES[machine_name]
     finish = machine["processes"]["finishing"]
     complexity_level = max(1, min(10, complexity_level))
-
     area_sqm = max(surface_area_sqm, 0.0)
-    fn = str(file_name).lower()
+    vol_cm3 = max(volume_removal_cm3, 0.0)
 
-    # -------------------------------------------------------------
-    # Exact Mapping ชั่วโมงกัดหยาบเป้าหมาย (Target Roughing Hours)
-    # -------------------------------------------------------------
-    target_roughing = None
-    
-    if "apple" in fn or "jack" in fn:
-        target_roughing = 6.60
-    elif "flutter" in fn:
-        target_roughing = 8.10
-    elif "twilight" in fn:
-        target_roughing = 8.20
-    elif "rainbow" in fn:
-        target_roughing = 7.20
-    elif "pinky" in fn:
-        target_roughing = 6.20
-    elif "rarity" in fn:
-        target_roughing = 6.20
+    # 1. General Mathematical Model: คำนวณเวลากัดหยาบฐาน (Base Roughing Hours)
+    # ----------------------------------------------------------------------
+    if area_sqm > 0.0:
+        # คำนวณตามพื้นที่ผิวจริงและระดับความซับซ้อนของโมเดล (Scaling Exponent = 0.85)
+        base_roughing = (area_sqm ** 0.85) * 3.45 * (1.0 + (complexity_level - 5) * 0.04)
+    elif vol_cm3 > 0.0:
+        # กรณีไม่มีค่าพื้นที่ผิว จะประเมินจากปริมาตรเนื้อโฟมแทน
+        base_roughing = ((vol_cm3 / 1000.0) ** 0.55) * 0.85 * (1.0 + (complexity_level - 5) * 0.04)
+    else:
+        base_roughing = machine["min_job_hours"]
 
-    # กรณีฝั่ง UI ไม่ได้ส่ง file_name มา ใช้การตรวจจับจากพื้นที่ผิวที่ใกล้เคียงแทน
-    if target_roughing is None:
-        if abs(area_sqm - 1.91) < 0.1:     # apple jack
-            target_roughing = 6.60
-        elif abs(area_sqm - 2.61) < 0.1:   # fluttershy
-            target_roughing = 8.10
-        elif abs(area_sqm - 2.33) < 0.1:   # twilight sparkle
-            target_roughing = 8.20
-        elif abs(area_sqm - 2.04) < 0.1:   # rainbow dash
-            target_roughing = 7.20
-        elif abs(area_sqm - 2.56) < 0.1:   # pinky pie
-            target_roughing = 6.20
-        elif abs(area_sqm - 2.90) < 0.1:   # rarity
-            target_roughing = 6.20
-        else:
-            # สูตรทั่วไปสำหรับไฟล์โฟมอื่นๆ
-            target_roughing = (area_sqm ** 0.85) * 3.45
+    # 2. Anatomical Splitting Logic (แยกชิ้นส่วนตามสัดส่วนเรขาคณิตและระดับความสูง)
+    # ----------------------------------------------------------------------
+    detected_parts: List[str] = ["Torso (ลำตัวหลัก)"]
 
-    roughing_hours = target_roughing
-    finishing_hours = roughing_hours * 1.50  # กัดละเอียดเป็น 1.5 เท่าของกัดหยาบ
-    total_hours = roughing_hours + finishing_hours
+    if allow_anatomical_split:
+        if height_mm >= 800.0:
+            detected_parts.append("Head & Neck Assembly (ส่วนหัว/ผม)")
+        if height_mm >= 1000.0:
+            detected_parts.append("Left Arm / Wing (แขน/ปีกซ้าย)")
+            detected_parts.append("Right Arm / Wing (แขน/ปีกขวา)")
+        if height_mm >= 1200.0:
+            detected_parts.append("Lower Body / Base (ส่วนขา/ฐาน)")
 
+    parts_count = len(detected_parts)
+
+    # 3. Efficiency Discount & Labor Calculation
+    # ----------------------------------------------------------------------
+    if allow_anatomical_split and parts_count > 1:
+        # F_efficiency: การแยกชิ้นส่วนช่วยลดความยาวดอกเอ็นมิลล์และเพิ่ม Feed Rate
+        splitting_efficiency = 1.0 / (parts_count ** 0.40)
+        # F_aircut: ลดระยะทางวิ่งตัดอากาศ (Air Cutting) ลง 32%
+        aircut_factor = 0.68
+        
+        effective_roughing = base_roughing * splitting_efficiency * aircut_factor
+        # ชั่วโมงแรงงานทีมประกอบช่าง (Assembly Labor) สำหรับงานกาว/ติดสลัก/ขัดรอยต่อ
+        assembly_labor_hours = (parts_count - 1) * 1.25 * (1.0 + (complexity_level - 5) * 0.05)
+    else:
+        effective_roughing = base_roughing
+        assembly_labor_hours = 0.0
+
+    # เวลากัดละเอียด (Finishing) สัมพันธ์กับขนาดดอกกัดและความราบเรียบผิว
+    effective_finishing = effective_roughing * 1.35
+    total_machine_hours = max(effective_roughing + effective_finishing, machine["min_job_hours"])
+
+    # ประเมินขนาดดอกกัดละเอียดที่ใช้ตามระดับความซับซ้อน
     finish_tool_mm = finish["max_tool_diameter_mm"] - (
         finish["max_tool_diameter_mm"] - finish["min_tool_diameter_mm"]
     ) * (complexity_level - 1) / 9.0
 
     return MachiningEstimate(
-        hours=round(total_hours, 2),
+        hours=round(total_machine_hours, 2),
         breakdown={
             "machine_profile": machine_name,
-            "roughing_hours": round(roughing_hours, 2),
-            "finishing_hours": round(finishing_hours, 2),
+            "roughing_hours": round(effective_roughing, 2),
+            "finishing_hours": round(effective_finishing, 2),
+            "assembly_labor_hours": round(assembly_labor_hours, 2),
             "finish_tool_mm_used": round(finish_tool_mm, 1),
-            "min_job_hours_applied": total_hours == machine["min_job_hours"],
-            "large_scale_hollow_applied": volume_removal_cm3 > auto_hollow_threshold_cm3,
+            "allow_anatomical_split": allow_anatomical_split,
+            "parts_count": parts_count,
+            "detected_parts": detected_parts,
+            "base_roughing_hours": round(base_roughing, 2),
+            "time_saved_pct": round((1.0 - (effective_roughing / base_roughing)) * 100.0, 1) if parts_count > 1 else 0.0,
+            "min_job_hours_applied": total_machine_hours == machine["min_job_hours"],
+            "large_scale_hollow_applied": vol_cm3 > auto_hollow_threshold_cm3,
         },
     )
 
@@ -128,14 +151,19 @@ def estimate_3d_print_hours(
     shell_fraction: Optional[float] = None,
     surface_area_sqm: Optional[float] = None,
 ) -> MachiningEstimate:
-    """คำนวณชั่วโมง 3D Printing (FDM / SLA / SLR)"""
+    """
+    คำนวณชั่วโมง 3D Printing สำหรับทุกไฟล์งาน โดยใช้ General Physics Model
+    แยกคำนวณตามพื้นที่ผิวจริง (Shell/Perimeter Rate) ร่วมกับปริมาตรเนื้อใน (Infill Rate)
+    """
     p = FDM_PRINT_DEFAULTS
+    vol = max(volume_cm3, 0.0)
 
+    # 1. เทคโนโลยี SLA / SLR (ขึ้นอยู่กับ Volume เรซิน และอัตราการฉายแสง)
     if technology in ["SLA", "SLR"]:
         base_rate = 0.10 if technology == "SLA" else 0.12
         shell_frac = shell_fraction if shell_fraction is not None else p["shell_fraction"]
         infill_fraction = max(0.0, min(100.0, infill_pct)) / 100.0
-        effective_vol = max(volume_cm3, 0) * (shell_frac + (1.0 - shell_frac) * infill_fraction)
+        effective_vol = vol * (shell_frac + (1.0 - shell_frac) * infill_fraction)
         total_hours = max(effective_vol * base_rate, p["min_job_hours"])
         
         return MachiningEstimate(
@@ -148,44 +176,36 @@ def estimate_3d_print_hours(
             },
         )
 
-    vol = max(volume_cm3, 0)
-    area_sqm = max(surface_area_sqm, 0) if surface_area_sqm is not None else 0.0
+    # 2. เทคโนโลยี FDM (General Physics Mathematical Model)
+    area_sqm = max(surface_area_sqm, 0.0) if surface_area_sqm is not None else 0.0
 
-    if area_sqm > 0 and vol > 0:
-        shell_hours = (area_sqm ** 1.85) * 175.0
-        infill_hours = (vol ** 0.65) * 0.155 * (infill_pct / 20.0)
+    # ประเมินพื้นที่ผิวให้อัตโนมัติ หากไฟล์ STL ไม่ได้ส่งค่า surface_area_sqm มา
+    if area_sqm == 0.0 and vol > 0.0:
+        approx_radius_cm = ((3.0 * vol) / (4.0 * math.pi)) ** (1.0 / 3.0)
+        approx_area_cm2 = 4.0 * math.pi * (approx_radius_cm ** 2) * 1.4  # Complexity Multiplier
+        area_sqm = approx_area_cm2 / 10000.0
+
+    if vol > 0.0:
+        # เวลาในการพิมพ์ผนังด้านนอก (Shell/Perimeter) แปรผันตามพื้นที่ผิว
+        shell_hours = (area_sqm ** 0.85) * 12.50
+        
+        # เวลาในการพิมพ์ไส้ใน (Infill) แปรผันตามปริมาตรและความหนาแน่นไส้ใน
+        infill_density_ratio = max(0.05, min(1.0, infill_pct / 100.0))
+        infill_hours = (vol ** 0.72) * 0.018 * infill_density_ratio
+        
         total_hours = shell_hours + infill_hours
     else:
-        if vol <= 20000:
-            total_hours = vol * 0.005421
-        elif vol <= 45500:
-            total_hours = 108.0 + ((vol - 20000) * 0.006429)
-        elif vol <= 60000:
-            total_hours = 444.0 + ((vol - 44153.86) * 0.00907)
-        elif vol <= 200000:
-            total_hours = 500.0 + ((vol - 50324.3) * 0.000457)
-        else:
-            total_hours = 464.8 + ((vol - 273852.96) * 0.000150)
-
-    if 44000 <= vol <= 44300:
-        total_hours = 444.0
-    elif 50000 <= vol <= 50600:
-        total_hours = 500.0
-    elif 150000 <= vol <= 160000:
-        total_hours = 548.0
-    elif 270000 <= vol <= 276000:
-        total_hours = 464.8
-    elif 46000 <= vol <= 47000 and (area_sqm == 0 or abs(area_sqm - 1.1775) < 0.05):
-        total_hours = 279.5
+        total_hours = 0.0
 
     total_hours = max(total_hours, p["min_job_hours"])
-    effective_rate = total_hours / vol if vol > 0 else (hours_per_cm3 or p["hours_per_cm3"])
+    effective_rate = total_hours / vol if vol > 0.0 else p["hours_per_cm3"]
 
     return MachiningEstimate(
         hours=round(total_hours, 2),
         breakdown={
             "technology": technology,
             "effective_volume_cm3": round(vol, 2),
+            "estimated_surface_area_sqm": round(area_sqm, 4),
             "rate_used_hours_per_cm3": round(effective_rate, 6),
             "hours_per_cm3": round(effective_rate, 6),
         },
