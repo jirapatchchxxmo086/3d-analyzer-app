@@ -32,23 +32,23 @@ def estimate_foam_cnc_hours(
     if area_sqm == 0.0 and volume_removal_cm3 > 0.0:
         area_sqm = ((volume_removal_cm3 / 1_000_000.0) ** (2.0 / 3.0)) * 6.0
 
-    # 1. Base Machine Rate ปรับให้สอดคล้องกับข้อมูลจริง (เช่น พื้นที่ 2.7 ตร.ม. ได้ ~8 ชม., 1.91 ตร.ม. ได้ ~6.7 ชม.)
+    # 1. Base Machine Rate ปรับให้สอดคล้องกับชั่วโมงรวมในใบประเมิน (เช่น 1.91 ตร.ม. ได้ ~6.7 ชม., 2.7 ตร.ม. ได้ ~8.0 ชม.)
     base_rate = 2.80 + (complexity_level * 0.15)
     base_machine_hours = area_sqm * base_rate
 
-    # 2. Program & Setup Time
+    # 2. Program & Setup Time (ถ้าต้องการให้เครื่องจักรเด่น อาจปรับ setup เล็กน้อย)
     program_hours = 0.2
     if setup_hours_override is not None:
         setup_hours = setup_hours_override
     else:
-        setup_hours = 1.0 if area_sqm < 2.0 else 0.5
+        setup_hours = 0.5 if area_sqm < 2.0 else 0.5
 
     effective_machine_hours = base_machine_hours
     total_time = effective_machine_hours + program_hours + setup_hours
 
-    # ให้ Roughing กินสัดส่วนหลักของชั่วโมงเครื่องจักร (ประมาณ 90%) และ Finishing เก็บรายละเอียด (ประมาณ 10%)
-    roughing_hrs = round(effective_machine_hours * 0.90, 2)
-    finishing_hrs = round(effective_machine_hours * 0.10, 2)
+    # ให้ช่อง "ชั่วโมงกัดหยาบ (Roughing)" แสดงผลรวมหลักที่เทียบเท่ากับใบประเมิน
+    roughing_hrs = round(effective_machine_hours, 2)
+    finishing_hrs = round(program_hours + setup_hours, 2)  # แยกส่วนย่อยเก็บไว้ใน finishing หรือแยกตามสัดส่วนจริง
 
     # เลือกขนาดดอก Finishing อัตโนมัติตาม Complexity
     finish_tool_mm = 6.0 if complexity_level >= 4 else 10.0
