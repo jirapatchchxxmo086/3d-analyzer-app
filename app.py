@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
 # ---------------------------------------------------------
-# 1. PAGE CONFIGURATION (ต้องอยู่บรรทัดแรกสุดของ Streamlit)
+# 1. PAGE CONFIGURATION (ต้องอยู่บรรทัดแรกสุดเสมอ)
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="3D & CNC Machining Estimator",
@@ -30,6 +30,11 @@ def estimate_foam_cnc_hours(
     allow_anatomical_split: bool = True,
     machine_name: str = "Robot_Foam",
 ) -> MachiningEstimate:
+    """
+    คำนวณชั่วโมง Robot Foam CNC 
+    - Machine Time ในใบประเมิน = เวลา กัดหยาบ (Roughing)
+    - เวลา กัดรายละเอียด (Finishing) คิดเพิ่มตาม Complexity
+    """
     area_sqm = max(surface_area_sqm, 0.0)
     
     if area_sqm == 0.0 and volume_removal_cm3 > 0.0:
@@ -78,6 +83,9 @@ def estimate_3d_print_hours(
     complexity_level: int = 4,
     technology: str = "FDM",
 ) -> MachiningEstimate:
+    """
+    คำนวณชั่วโมง 3D Print FDM
+    """
     area_sqm = max(surface_area_sqm, 0.0)
 
     if area_sqm == 0.0 and volume_cm3 > 0.0:
@@ -118,12 +126,12 @@ def estimate_3d_print_hours(
 
 
 # ---------------------------------------------------------
-# 3. STREAMLIT USER INTERFACE
+# 3. STREAMLIT USER INTERFACE ( UI เต็มรูปแบบ )
 # ---------------------------------------------------------
 st.title("⚙️ ระบบประเมินเวลาและต้นทุน CNC / 3D Print")
 st.caption("Robot CNC (กัดโฟม) & 3D Printing (FDM)")
 
-# Sidebar Selection
+# Sidebar Settings
 st.sidebar.header("📌 ตั้งค่าการประเมิน")
 process_type = st.sidebar.radio(
     "เลือกประเภทกระบวนการ:",
@@ -133,30 +141,66 @@ process_type = st.sidebar.radio(
 st.sidebar.markdown("---")
 complexity = st.sidebar.slider("ระดับความซับซ้อนของชิ้นงาน (Complexity):", 1, 5, 3)
 
-# Main Form inputs
-col1, col2 = st.columns(2)
+# Main Input Section
+st.subheader("📐 ข้อมูลขนาดและพื้นที่ผิวชิ้นงาน")
 
-with col1:
-    surface_area = st.number_input("พื้นที่ผิวชิ้นงาน (ตร.ม. / sqm):", min_value=0.0, value=1.5, step=0.1)
+input_mode = st.radio(
+    "วิธีการระบุขนาดชิ้นงาน:",
+    ["ระบุขนาดกว้าง x ยาว x สูง (ระบบประเมินพื้นที่ให้อัตโนมัติ)", "ระบุพื้นที่ผิวและปริมาตรโดยตรง"],
+    horizontal=True
+)
 
-with col2:
-    volume = st.number_input("ปริมาตรชิ้นงาน (ลบ.ซม. / cm³):", min_value=0.0, value=50000.0, step=1000.0)
+surface_area_sqm = 0.0
+volume_cm3 = 0.0
+height_mm = 1000.0
+
+if input_mode == "ระบุขนาดกว้าง x ยาว x สูง (ระบบประเมินพื้นที่ให้อัตโนมัติ)":
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        width_mm = st.number_input("ความกว้าง Width (mm):", min_value=1.0, value=500.0, step=50.0)
+    with c2:
+        length_mm = st.number_input("ความยาว Length (mm):", min_value=1.0, value=500.0, step=50.0)
+    with c3:
+        height_mm = st.number_input("ความสูง Height (mm):", min_value=1.0, value=1000.0, step=50.0)
+
+    # แปลงหน่วยเป็นเมตรและเซนติเมตร
+    w_m, l_m, h_m = width_mm / 1000.0, length_mm / 1000.0, height_mm / 1000.0
+    
+    # ประเมินพื้นที่ผิวทรงกล่อง (Bounding Box Surface Area)
+    bounding_box_area = 2 * (w_m * l_m + w_m * h_m + l_m * h_m)
+    
+    # ปรับลดตัวคูณตามทรงรูปทรงจริง (Organic Shape Factor ~0.7-0.85)
+    shape_factor = st.slider("ตัวคูณรูปทรง (Shape Factor):", 0.5, 1.0, 0.75, 0.05, 
+                             help="0.6 = ทรงอินทรีย์/การ์ตูนโค้งมน, 1.0 = ทรงกล่องสี่เหลี่ยมเป๊ะ")
+    
+    surface_area_sqm = bounding_box_area * shape_factor
+    volume_cm3 = (width_mm / 10.0) * (length_mm / 10.0) * (height_mm / 10.0) * shape_factor
+
+    st.info(f"💡 **ประมาณการณ์จากขนาด:** พื้นที่ผิว ≈ **{surface_area_sqm:.2f} ตร.ม.** | ปริมาตร ≈ **{volume_cm3:,.0f} cm³**")
+
+else:
+    col1, col2 = st.columns(2)
+    with col1:
+        surface_area_sqm = st.number_input("พื้นที่ผิวชิ้นงาน (ตร.ม. / sqm):", min_value=0.0, value=1.5, step=0.1)
+    with col2:
+        volume_cm3 = st.number_input("ปริมาตรชิ้นงาน (ลบ.ซม. / cm³):", min_value=0.0, value=50000.0, step=1000.0)
 
 st.markdown("---")
 
-# Calculate Button
+# คำนวณเมื่อกดปุ่ม
 if st.button("🚀 คำนวณเวลาประเมิน", type="primary", use_container_width=True):
     try:
         if process_type == "Robot CNC (กัดโฟม)":
             result = estimate_foam_cnc_hours(
-                volume_removal_cm3=volume,
-                surface_area_sqm=surface_area,
-                complexity_level=complexity
+                volume_removal_cm3=volume_cm3,
+                surface_area_sqm=surface_area_sqm,
+                complexity_level=complexity,
+                height_mm=height_mm
             )
         else:
             result = estimate_3d_print_hours(
-                volume_cm3=volume,
-                surface_area_sqm=surface_area,
+                volume_cm3=volume_cm3,
+                surface_area_sqm=surface_area_sqm,
                 complexity_level=complexity
             )
 
@@ -175,13 +219,13 @@ if st.button("🚀 คำนวณเวลาประเมิน", type="prim
         b1, b2 = st.columns(2)
         with b1:
             st.write(f"• **กระบวนการ:** {bd['machine_type']}")
-            st.write(f"• **พื้นที่ผิวที่คำนวณ:** {bd['surface_area_sqm']} ตร.ม.")
+            st.write(f"• **พื้นที่ผิวที่ใช้คำนวณ:** {bd['surface_area_sqm']} ตร.ม.")
             st.write(f"• **เวลากัดหยาบ (Roughing):** {bd['roughing_hours']} ชม.")
-            st.write(f"• **เวลาเก็บละเอียด (Finishing):** {bd['finishing_hours']} ชม.")
+            st.write(f"• **เวลาเก็บรายละเอียด (Finishing):** {bd['finishing_hours']} ชม.")
             
         with b2:
-            st.write(f"• **เวลาเขียนโปรแกรม:** {bd['program_hours']} ชม.")
-            st.write(f"• **เวลา Setup:** {bd['setup_hours']} ชม.")
+            st.write(f"• **เวลาเขียนโปรแกรม (CAM):** {bd['program_hours']} ชม.")
+            st.write(f"• **เวลา Setup เครื่อง:** {bd['setup_hours']} ชม.")
             st.write(f"• **ขนาดดอกกัด/หัวฉีด:** {bd['finish_tool_mm_used']} mm")
             st.write(f"• **อัตราค่าบริการ:** {bd['hourly_rate_baht']} บาท/ชม.")
 
