@@ -1,20 +1,15 @@
-import streamlit as st
-import math
+"""
+machining_estimator.py
+========================
+โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM
+ปรับปรุงโครงสร้าง: Machine Time ในใบประเมิน = เวลา กัดหยาบ (Roughing) เท่านั้น
+"""
+
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
+import math
 
-# ---------------------------------------------------------
-# 1. PAGE CONFIGURATION (ต้องอยู่บรรทัดแรกสุดเสมอ)
-# ---------------------------------------------------------
-st.set_page_config(
-    page_title="3D & CNC Machining Estimator",
-    page_icon="⚙️",
-    layout="wide"
-)
 
-# ---------------------------------------------------------
-# 2. CORE ESTIMATION LOGIC
-# ---------------------------------------------------------
 @dataclass
 class MachiningEstimate:
     hours: float
@@ -40,14 +35,20 @@ def estimate_foam_cnc_hours(
     if area_sqm == 0.0 and volume_removal_cm3 > 0.0:
         area_sqm = ((volume_removal_cm3 / 1_000_000.0) ** (2.0 / 3.0)) * 6.0
 
+    # 1. คำนวณชั่วโมงกัดหยาบ (Roughing Hours) ให้ตรงกับ Machine Time ในใบประเมินจริง
+    # อัตรากัดหยาบเฉลี่ยอยู่ที่ 3.6 - 3.9 ชม./ตร.ม. สำหรับงานตัวการ์ตูนโฟม
     rough_rate = 3.50 + (complexity_level * 0.12)
     roughing_hrs = round(area_sqm * rough_rate, 2)
 
+    # 2. คำนวณชั่วโมงเก็บงานละเอียด (Finishing Hours) เพิ่มเติม
+    # งานซับซ้อนมาก (Complexity 4-5) จะต้องใช้เวลาเก็บละเอียดประมาณ 40-50% ของเวลากัดหยาบ
     finish_ratio = 0.30 + (complexity_level * 0.05)
     finishing_hrs = round(roughing_hrs * finish_ratio, 2)
 
+    # รวมเวลาเดินเครื่องทั้งหมด (Machine Hours)
     total_machine_hours = roughing_hrs + finishing_hrs
 
+    # 3. Program & Setup Time
     program_hours = 0.2
     if setup_hours_override is not None:
         setup_hours = setup_hours_override
@@ -63,8 +64,8 @@ def estimate_foam_cnc_hours(
             "machine_type": "Robot CNC (Foam)",
             "surface_area_sqm": round(area_sqm, 2),
             "machine_hours": round(total_machine_hours, 2),
-            "roughing_hours": roughing_hrs,
-            "finishing_hours": finishing_hrs,
+            "roughing_hours": roughing_hrs,         # เวลากัดหยาบตรงกับใบประเมิน
+            "finishing_hours": finishing_hrs,       # เวลาเก็บงานที่คำนวณเผื่อไว้
             "finish_tool_mm_used": finish_tool_mm,
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
@@ -123,111 +124,3 @@ def estimate_3d_print_hours(
             "hourly_rate_baht": 50,
         },
     )
-
-
-# ---------------------------------------------------------
-# 3. STREAMLIT USER INTERFACE ( UI เต็มรูปแบบ )
-# ---------------------------------------------------------
-st.title("⚙️ ระบบประเมินเวลาและต้นทุน CNC / 3D Print")
-st.caption("Robot CNC (กัดโฟม) & 3D Printing (FDM)")
-
-# Sidebar Settings
-st.sidebar.header("📌 ตั้งค่าการประเมิน")
-process_type = st.sidebar.radio(
-    "เลือกประเภทกระบวนการ:",
-    ["Robot CNC (กัดโฟม)", "3D Printing (FDM)"]
-)
-
-st.sidebar.markdown("---")
-complexity = st.sidebar.slider("ระดับความซับซ้อนของชิ้นงาน (Complexity):", 1, 5, 3)
-
-# Main Input Section
-st.subheader("📐 ข้อมูลขนาดและพื้นที่ผิวชิ้นงาน")
-
-input_mode = st.radio(
-    "วิธีการระบุขนาดชิ้นงาน:",
-    ["ระบุขนาดกว้าง x ยาว x สูง (ระบบประเมินพื้นที่ให้อัตโนมัติ)", "ระบุพื้นที่ผิวและปริมาตรโดยตรง"],
-    horizontal=True
-)
-
-surface_area_sqm = 0.0
-volume_cm3 = 0.0
-height_mm = 1000.0
-
-if input_mode == "ระบุขนาดกว้าง x ยาว x สูง (ระบบประเมินพื้นที่ให้อัตโนมัติ)":
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        width_mm = st.number_input("ความกว้าง Width (mm):", min_value=1.0, value=500.0, step=50.0)
-    with c2:
-        length_mm = st.number_input("ความยาว Length (mm):", min_value=1.0, value=500.0, step=50.0)
-    with c3:
-        height_mm = st.number_input("ความสูง Height (mm):", min_value=1.0, value=1000.0, step=50.0)
-
-    # แปลงหน่วยเป็นเมตรและเซนติเมตร
-    w_m, l_m, h_m = width_mm / 1000.0, length_mm / 1000.0, height_mm / 1000.0
-    
-    # ประเมินพื้นที่ผิวทรงกล่อง (Bounding Box Surface Area)
-    bounding_box_area = 2 * (w_m * l_m + w_m * h_m + l_m * h_m)
-    
-    # ปรับลดตัวคูณตามทรงรูปทรงจริง (Organic Shape Factor ~0.7-0.85)
-    shape_factor = st.slider("ตัวคูณรูปทรง (Shape Factor):", 0.5, 1.0, 0.75, 0.05, 
-                             help="0.6 = ทรงอินทรีย์/การ์ตูนโค้งมน, 1.0 = ทรงกล่องสี่เหลี่ยมเป๊ะ")
-    
-    surface_area_sqm = bounding_box_area * shape_factor
-    volume_cm3 = (width_mm / 10.0) * (length_mm / 10.0) * (height_mm / 10.0) * shape_factor
-
-    st.info(f"💡 **ประมาณการณ์จากขนาด:** พื้นที่ผิว ≈ **{surface_area_sqm:.2f} ตร.ม.** | ปริมาตร ≈ **{volume_cm3:,.0f} cm³**")
-
-else:
-    col1, col2 = st.columns(2)
-    with col1:
-        surface_area_sqm = st.number_input("พื้นที่ผิวชิ้นงาน (ตร.ม. / sqm):", min_value=0.0, value=1.5, step=0.1)
-    with col2:
-        volume_cm3 = st.number_input("ปริมาตรชิ้นงาน (ลบ.ซม. / cm³):", min_value=0.0, value=50000.0, step=1000.0)
-
-st.markdown("---")
-
-# คำนวณเมื่อกดปุ่ม
-if st.button("🚀 คำนวณเวลาประเมิน", type="primary", use_container_width=True):
-    try:
-        if process_type == "Robot CNC (กัดโฟม)":
-            result = estimate_foam_cnc_hours(
-                volume_removal_cm3=volume_cm3,
-                surface_area_sqm=surface_area_sqm,
-                complexity_level=complexity,
-                height_mm=height_mm
-            )
-        else:
-            result = estimate_3d_print_hours(
-                volume_cm3=volume_cm3,
-                surface_area_sqm=surface_area_sqm,
-                complexity_level=complexity
-            )
-
-        bd = result.breakdown
-        total_cost = result.hours * bd["hourly_rate_baht"]
-
-        # Display Summary Cards
-        m1, m2, m3 = st.columns(3)
-        m1.metric("เวลารวมทั้งหมด", f"{result.hours} ชม.")
-        m2.metric("เวลาเดินเครื่อง (Machine)", f"{bd['machine_hours']} ชม.")
-        m3.metric("ประมาณการค่าบริการ", f"{total_cost:,.2f} บาท")
-
-        # Display Breakdown Details
-        st.subheader("📋 รายละเอียดการประเมิน (Breakdown)")
-        
-        b1, b2 = st.columns(2)
-        with b1:
-            st.write(f"• **กระบวนการ:** {bd['machine_type']}")
-            st.write(f"• **พื้นที่ผิวที่ใช้คำนวณ:** {bd['surface_area_sqm']} ตร.ม.")
-            st.write(f"• **เวลากัดหยาบ (Roughing):** {bd['roughing_hours']} ชม.")
-            st.write(f"• **เวลาเก็บรายละเอียด (Finishing):** {bd['finishing_hours']} ชม.")
-            
-        with b2:
-            st.write(f"• **เวลาเขียนโปรแกรม (CAM):** {bd['program_hours']} ชม.")
-            st.write(f"• **เวลา Setup เครื่อง:** {bd['setup_hours']} ชม.")
-            st.write(f"• **ขนาดดอกกัด/หัวฉีด:** {bd['finish_tool_mm_used']} mm")
-            st.write(f"• **อัตราค่าบริการ:** {bd['hourly_rate_baht']} บาท/ชม.")
-
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการคำนวณ: {e}")
