@@ -670,26 +670,13 @@ if page == t["page_1_name"]:
     </div>
     """, unsafe_allow_html=True)
 
-    up_col1, up_col2 = st.columns([3, 1])
-    with up_col1:
-        uploaded_file = st.file_uploader(
-            t["file_uploader"],
-            type=["stl", "obj", "ply", "off", "3mf"]
-        )
-    with up_col2:
-        file_unit = st.selectbox(
-            "หน่วยของไฟล์ต้นฉบับ" if lang == "TH" else "Source file unit",
-            options=list(UNIT_TO_MM.keys()),
-            index=0,
-            help=(
-                "ไฟล์ 3D (STL/OBJ/PLY/OFF) ไม่มีหน่วยกำกับในตัวไฟล์ "
-                "กรุณาเลือกหน่วยที่ใช้ตอนสร้างโมเดล มิฉะนั้นขนาด/พื้นที่/ปริมาตรที่คำนวณได้จะผิดพลาด"
-                if lang == "TH" else
-                "3D files (STL/OBJ/PLY/OFF) store no unit metadata. Pick the unit "
-                "the model was authored in, or dimensions/area/volume will be wrong."
-            ),
-        )
-    file_unit_to_mm = UNIT_TO_MM[file_unit]
+    uploaded_file = st.file_uploader(
+        t["file_uploader"],
+        type=["stl", "obj", "ply", "off", "3mf"]
+    )
+    # Source file unit is fixed to mm (no dropdown) per request — all files in
+    # this workflow are authored in mm.
+    file_unit_to_mm = UNIT_TO_MM["mm"]
 
     if uploaded_file is not None:
         file_extension = os.path.splitext(uploaded_file.name)[1].lower()
