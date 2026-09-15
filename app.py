@@ -359,6 +359,12 @@ if "submesh_count" not in st.session_state:
 # ==========================================
 SCALE_TO_M = 0.001
 
+# STL/OBJ/PLY/OFF files carry no unit metadata — trimesh just returns whatever
+# numbers are in the file. The app previously assumed every file was already
+# in millimeters (see FIX NOTE below), which silently produces wrong areas/
+# volumes/prices for files authored in cm, m, or inches. Let the user tell us.
+UNIT_TO_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "inch": 25.4}
+
 def process_and_clean_mesh(loaded_data):
     sub_count = 1
     if isinstance(loaded_data, trimesh.Scene):
@@ -512,7 +518,7 @@ HTML_TEMPLATE = Template("""
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
 
-        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / 500, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / 500, 0.1, 10000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(container.clientWidth, 500);
         renderer.setPixelRatio(window.devicePixelRatio);
@@ -562,6 +568,16 @@ HTML_TEMPLATE = Template("""
 
             geometry.computeBoundingSphere();
             const radius = geometry.boundingSphere.radius;
+
+            // FIX: near/far and orbit zoom limits now scale with the model instead
+            // of being fixed values, so large models don't get clipped by the far
+            // plane and small models don't get near-clipped when zoomed in close.
+            camera.near = Math.max(radius / 500, 0.01);
+            camera.far = Math.max(radius * 20, 2000);
+            camera.updateProjectionMatrix();
+            controls.minDistance = camera.near * 4;
+            controls.maxDistance = camera.far * 0.9;
+
             camera.position.set(radius * 2.2, radius * 2.2, radius * 2.2);
             camera.lookAt(0, 0, 0);
             controls.update();
@@ -654,10 +670,26 @@ if page == t["page_1_name"]:
     </div>
     """, unsafe_allow_html=True)
 
-    uploaded_file = st.file_uploader(
-        t["file_uploader"],
-        type=["stl", "obj", "ply", "off", "3mf"]
-    )
+    up_col1, up_col2 = st.columns([3, 1])
+    with up_col1:
+        uploaded_file = st.file_uploader(
+            t["file_uploader"],
+            type=["stl", "obj", "ply", "off", "3mf"]
+        )
+    with up_col2:
+        file_unit = st.selectbox(
+            "หน่วยของไฟล์ต้นฉบับ" if lang == "TH" else "Source file unit",
+            options=list(UNIT_TO_MM.keys()),
+            index=0,
+            help=(
+                "ไฟล์ 3D (STL/OBJ/PLY/OFF) ไม่มีหน่วยกำกับในตัวไฟล์ "
+                "กรุณาเลือกหน่วยที่ใช้ตอนสร้างโมเดล มิฉะนั้นขนาด/พื้นที่/ปริมาตรที่คำนวณได้จะผิดพลาด"
+                if lang == "TH" else
+                "3D files (STL/OBJ/PLY/OFF) store no unit metadata. Pick the unit "
+                "the model was authored in, or dimensions/area/volume will be wrong."
+            ),
+        )
+    file_unit_to_mm = UNIT_TO_MM[file_unit]
 
     if uploaded_file is not None:
         file_extension = os.path.splitext(uploaded_file.name)[1].lower()
@@ -674,8 +706,11 @@ if page == t["page_1_name"]:
 
                 is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
+                # FIX: previously `mesh_mm.apply_scale(SCALE_TO_M * 1000.0)` == apply_scale(1.0),
+                # a no-op that silently assumed the source file was already in millimeters.
+                # Now it uses the unit the user picked above.
                 mesh_mm = mesh.copy()
-                mesh_mm.apply_scale(SCALE_TO_M * 1000.0)
+                mesh_mm.apply_scale(file_unit_to_mm)
                 base_extents = mesh_mm.extents
                 base_w_mm, base_l_mm, base_h_mm = float(base_extents[0]), float(base_extents[1]), float(base_extents[2])
 
@@ -710,6 +745,12 @@ if page == t["page_1_name"]:
                 st.sidebar.subheader(t["size_panel_title"])
                 st.sidebar.caption(t["size_panel_sub"])
                 st.sidebar.toggle(t["lock_ratio"], key="lock_ratio_toggle")
+                st.sidebar.caption(
+                    "🔓 ปิดสวิตช์นี้เพื่อปรับกว้าง/ยาว/สูงอิสระจากกัน — รูปทรงโมเดลจะยืด/บีบตามค่าที่ตั้ง"
+                    if lang == "TH" else
+                    "🔓 Turn this off to set width/length/height independently — the "
+                    "model's shape will stretch/squash to match."
+                )
                 st.sidebar.number_input(t["size_w"], min_value=0.001, key="dim_w_mm", step=1.0, on_change=_sync_from_width)
                 st.sidebar.number_input(t["size_l"], min_value=0.001, key="dim_l_mm", step=1.0, on_change=_sync_from_length)
                 st.sidebar.number_input(t["size_h"], min_value=0.001, key="dim_h_mm", step=1.0, on_change=_sync_from_height)
@@ -872,28 +913,104 @@ elif page == t["page_2_name"]:
         st.session_state['surface_area_sqm']
     ))
 
+    if st.session_state.get("surface_area_sqm", 0.0) <= 0:
+        st.warning(
+            "⚠️ ยังไม่มีข้อมูลโมเดลจากหน้าแรก กรุณาอัปโหลดไฟล์ 3D ที่หน้า "
+            f"'{t['page_1_name']}' ก่อน ไม่เช่นนั้นราคาที่ประเมินจะอิงพื้นที่ผิว/ปริมาตร = 0"
+            if lang == "TH" else
+            "⚠️ No model data yet — please upload a 3D file on the "
+            f"'{t['page_1_name']}' page first, otherwise the estimate below will be "
+            "based on a surface area/volume of 0."
+        )
+
     from data_loader import (
         load_material_master_db,
         load_rate_dict,
         load_mold_rates,
         load_work_rates,
         load_color_finish_db,
+        load_labor_rates,
+        load_complexity_hours,
+        get_data_quality_warnings,
+        SheetAPIError,
         COAT_PROCESS_SHEET_NAME,
     )
     from machining_estimator import estimate_foam_cnc_hours, estimate_3d_print_hours
 
-    MATERIAL_MASTER_DB = load_material_master_db()
-    LEVEL_FACTORS = {1: 1.0, 2: 1.5, 3: 2.5, 4: 3.5, 5: 5.0, 6: 6.5, 7: 8.0, 8: 10.0, 9: 12.0, 10: 15.0}
+    # FIX: these were previously called with no caching, so every single widget
+    # interaction on this page (a slider drag, a number_input change, etc.)
+    # re-read the master-data source (Excel/Sheets) from scratch. That's the
+    # most likely cause of the page feeling slow/laggy. st.cache_data keeps the
+    # result in memory and only reloads if the underlying function's code/args
+    # change or the TTL expires.
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_material_master_db():
+        return load_material_master_db()
 
-    COAT_PROCESS_RATES = load_rate_dict(COAT_PROCESS_SHEET_NAME, "process_name", "rate")
-    MOLD_RATES = load_mold_rates()
-    WORK_RATES = load_work_rates()
-    COLOR_FINISH_DB = load_color_finish_db()
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_coat_process_rates():
+        return load_rate_dict(COAT_PROCESS_SHEET_NAME, "process_name", "rate")
 
-    LABOR_RATES = {"Engineer": 1000, "Worker": 500, "Designer": 2000}
-    HARD_COAT_HOURS = {1: 2, 2: 3, 3: 4, 4: 6, 5: 8, 6: 12, 7: 15, 8: 20}
-    SANDING_HOURS   = {1: 3, 2: 4, 3: 5, 4: 4, 5: 6, 6: 8, 7: 12, 8: 15}
-    PAINTING_HOURS  = {1: 4, 2: 5, 3: 6, 4: 8, 5: 15, 6: 20, 7: 30, 8: 40}
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_mold_rates():
+        return load_mold_rates()
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_work_rates():
+        return load_work_rates()
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_color_finish_db():
+        return load_color_finish_db()
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_labor_rates():
+        return load_labor_rates()
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_complexity_hours():
+        return load_complexity_hours()
+
+    # FIX: previously an unhandled network/token error here would crash the whole
+    # page with a raw traceback. Now it shows a message the user can act on, with
+    # a button to retry (clears the 5-minute cache so the next click re-fetches).
+    try:
+        MATERIAL_MASTER_DB = _cached_material_master_db()
+        COAT_PROCESS_RATES = _cached_coat_process_rates()
+        MOLD_RATES = _cached_mold_rates()
+        WORK_RATES = _cached_work_rates()
+        COLOR_FINISH_DB = _cached_color_finish_db()
+        LABOR_RATES = _cached_labor_rates()
+        COMPLEXITY_HOURS_DB = _cached_complexity_hours()
+    except SheetAPIError as e:
+        st.error(f"❌ โหลดข้อมูลราคาจาก Google Sheet ไม่สำเร็จ: {e}")
+        if st.button("🔄 ลองโหลดข้อมูลใหม่" if lang == "TH" else "🔄 Retry"):
+            st.cache_data.clear()
+            st.rerun()
+        st.stop()
+
+    # FIX: check_for_duplicate_items() existed in data_loader.py but was never
+    # called, so duplicate rows in the Sheet silently overwrote each other with
+    # no warning. Surface it here.
+    dq_warnings = get_data_quality_warnings()
+    if dq_warnings:
+        with st.expander(
+            f"⚠️ พบข้อมูลซ้ำในชีทราคา ({len(dq_warnings)} รายการ) — คลิกเพื่อดูรายละเอียด"
+            if lang == "TH" else
+            f"⚠️ Found {len(dq_warnings)} duplicate row(s) in the price sheet — click to view",
+            expanded=False,
+        ):
+            for w in dq_warnings:
+                st.write(f"- {w}")
+
+    # FIX: previously hardcoded here (and the hour tables stopped at level 8 even
+    # though the complexity slider goes to 10). Now sourced from the LaborRates /
+    # ComplexityHours sheets via Code.gs, so editing the sheet is enough to
+    # update these — no code deploy needed, and any level actually defined in
+    # the sheet is honored (not capped at 8).
+    HARD_COAT_HOURS = {lvl: v["hard_coat"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
+    SANDING_HOURS = {lvl: v["sanding"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
+    PAINTING_HOURS = {lvl: v["painting"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
 
     MACHINE_TYPES = {
         "Robot": "Baht/Hr.",
@@ -1264,6 +1381,14 @@ elif page == t["page_2_name"]:
                     st.toast(f"Added {hc_item}")
 
             with st.popover("💡 " + ("ตัวช่วยประเมินชั่วโมงแรงงาน" if lang == "TH" else "Labor hour helper")):
+                if complexity_level not in COMPLEXITY_HOURS_DB:
+                    st.warning(
+                        f"⚠️ ไม่มีข้อมูลชั่วโมงสำหรับ Level {complexity_level} ในชีท "
+                        "ComplexityHours — กรุณาเพิ่มแถวสำหรับ level นี้"
+                        if lang == "TH" else
+                        f"⚠️ No hour data for Level {complexity_level} in the "
+                        "ComplexityHours sheet — please add a row for this level."
+                    )
                 st.caption(
                     ("ชั่วโมงแนะนำตาม Level ปัจจุบัน (" if lang == "TH" else "Suggested hours for current Level (")
                     + f"{complexity_level}):"
@@ -1273,10 +1398,16 @@ elif page == t["page_2_name"]:
                     f"Sanding: `{SANDING_HOURS.get(complexity_level, '-')}` Hr. | "
                     f"Painting: `{PAINTING_HOURS.get(complexity_level, '-')}` Hr."
                 )
-                st.write(
-                    ("อัตราแรงงาน/วัน: " if lang == "TH" else "Daily labor rate: ")
-                    + " | ".join([f"{k} ฿{v:,.0f}" for k, v in LABOR_RATES.items()])
-                )
+                if LABOR_RATES:
+                    st.write(
+                        ("อัตราแรงงาน/วัน: " if lang == "TH" else "Daily labor rate: ")
+                        + " | ".join([f"{k} ฿{v:,.0f}" for k, v in LABOR_RATES.items()])
+                    )
+                else:
+                    st.caption(
+                        "⚠️ ไม่มีข้อมูลใน LaborRates sheet" if lang == "TH"
+                        else "⚠️ No data in LaborRates sheet"
+                    )
 
         else:
             c1, c2, c3, c4 = st.columns([2, 1.6, 1.3, 1])
