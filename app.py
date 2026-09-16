@@ -770,6 +770,7 @@ if page == t["page_1_name"]:
                 volume_m3 = 0.0
                 is_watertight = False
                 used_convex_hull = False
+                used_bbox_estimate = False
 
                 if is_point_cloud:
                     hull = final_mesh.convex_hull
@@ -787,6 +788,33 @@ if page == t["page_1_name"]:
                             hull = final_mesh.convex_hull
                             volume_m3 = hull.volume / 1_000_000_000.0
                             used_convex_hull = True
+                        except Exception:
+                            volume_m3 = 0.0
+
+                    # FIX: previously, if the mesh wasn't watertight AND convex_hull()
+                    # also failed/returned 0, volume_m3 stayed exactly 0 and that 0
+                    # silently flowed into every downstream calculation (page 2's 3D
+                    # print time estimate collapsed to program+setup only, with zero
+                    # machine time, because effective_volume got capped at 0). Two
+                    # more attempts before giving up:
+                    if volume_m3 <= 0:
+                        try:
+                            repaired = final_mesh.copy()
+                            trimesh.repair.fill_holes(repaired)
+                            if getattr(repaired, 'is_watertight', False):
+                                volume_m3 = repaired.volume / 1_000_000_000.0
+                                is_watertight = True
+                                used_convex_hull = False
+                        except Exception:
+                            pass
+                    if volume_m3 <= 0:
+                        try:
+                            # ASSUMPTION: ไม่รู้ solidity จริงของโมเดล ใช้ 40% ของปริมาตร
+                            # oriented bounding box เป็นค่ากลางๆ (ระหว่างโมเดลกลวงบางกับ
+                            # โมเดลตัน) — ประมาณคร่าวมาก แจ้งเตือนผู้ใช้ชัดเจนในหน้าเว็บ
+                            obb_volume_mm3 = final_mesh.bounding_box_oriented.volume
+                            volume_m3 = (obb_volume_mm3 * 0.4) / 1_000_000_000.0
+                            used_bbox_estimate = True
                         except Exception:
                             volume_m3 = 0.0
 
@@ -858,6 +886,22 @@ if page == t["page_1_name"]:
 
                 if is_watertight:
                     res_b.metric(t["vol_exact"], f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
+                elif used_bbox_estimate and volume_m3 > 0:
+                    res_b.metric(
+                        "ปริมาตร (ประมาณจาก Bounding Box)" if lang == "TH" else "Volume (Bounding Box estimate)",
+                        f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm"
+                    )
+                    st.warning(
+                        "⚠️ โมเดลนี้คำนวณปริมาตรแบบละเอียดไม่ได้ (ไม่ watertight และ "
+                        "Convex Hull ก็ล้มเหลว) ตัวเลขนี้จึงเป็นการประมาณคร่าวๆ จาก "
+                        "Bounding Box เท่านั้น (สมมติความตัน 40%) ไม่แม่นยำเท่าปริมาตรจริง "
+                        "— ควรตรวจสอบไฟล์ 3D ต้นฉบับว่ามีรูรั่ว/geometry เสียหรือไม่"
+                        if lang == "TH" else
+                        "⚠️ Couldn't compute an exact volume for this mesh (not "
+                        "watertight, and Convex Hull also failed). This is a rough "
+                        "estimate from the bounding box only (assuming 40% solidity) — "
+                        "check the source 3D file for holes/broken geometry."
+                    )
                 elif used_convex_hull and volume_m3 > 0:
                     res_b.metric(t["vol_hull"], f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
                     st.info(t["vol_note"])
@@ -1091,11 +1135,29 @@ elif page == t["page_2_name"]:
                     )
                     op_qty = None
                 elif selected_machine == "3D Print FDM":
-                    print_result = estimate_3d_print_hours(volume_cm3=per_piece_volume_cm3)
+                    fdm_infill_pct = st.slider(
+                        "Infill (%)" if lang != "TH" else "Infill (%)",
+                        min_value=0, max_value=100, value=15, step=5,
+                        key=f"fdm_infill_{selected_machine}",
+                        help=(
+                            "สัดส่วนเนื้อพลาสติกด้านในชิ้นงาน (ไม่รวมผนังนอก) — ยิ่งสูง "
+                            "ยิ่งใช้เส้นพลาสติกมากขึ้นและใช้เวลาพิมพ์นานขึ้นตามสัดส่วน"
+                            if lang == "TH" else
+                            "Interior fill density (walls are always ~100%) — higher "
+                            "infill uses proportionally more filament and print time."
+                        ),
+                    )
+                    print_result = estimate_3d_print_hours(
+                        volume_cm3=per_piece_volume_cm3,
+                        surface_area_sqm=per_piece_area,
+                        infill_pct=float(fdm_infill_pct),
+                        complexity_level=complexity_level,
+                    )
                     suggested_qty = print_result.hours
                     st.caption(
-                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น จากปริมาตรพิมพ์จริง "
-                        f"{print_result.breakdown['effective_volume_cm3']} cm³ "
+                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น น้ำหนักที่คาดว่าจะใช้ "
+                        f"~{print_result.breakdown['estimated_weight_g']:.0f} g "
+                        f"จากปริมาตรพิมพ์จริง {print_result.breakdown['effective_volume_cm3']} cm³ "
                         f"(อัตรา {print_result.breakdown['hours_per_cm3']:.5f} ชม./cm³)"
                     )
                     op_qty = st.number_input(
