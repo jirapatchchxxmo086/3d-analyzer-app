@@ -1298,6 +1298,96 @@ elif page == t["page_2_name"]:
             st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
 
     # ==========================================
+    # 📦 FOAM BLOCK ESTIMATOR (ระบบคำนวณจำนวนก้อนโฟมที่แนะนำ)
+    # ==========================================
+    st.markdown("---")
+    st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
+
+    FOAM_BLOCK_PRICES = {
+        "Foam 0.8 lb.": 2300.0,
+        "Foam 1.0 lb.": 2850.0,
+        "Foam 1.25 lb.": 3550.0,
+        "Foam 1.5 lb.": 4100.0,
+        "Foam 2.0 lb.": 6000.0,
+    }
+
+    FOAM_SIZES = {
+        "1.0 x 1.2 x 2.4 m (มาตรฐานใหญ่)": (1000.0, 1200.0, 2400.0),
+        "0.6 x 1.2 x 2.4 m (มาตรฐานกลาง)": (600.0, 1200.0, 2400.0),
+        "0.5 x 1.0 x 2.0 m (มาตรฐานเล็ก)": (500.0, 1000.0, 2000.0),
+        "Custom (กำหนดขนาดเอง)": None,
+    }
+
+    fb_c1, fb_c2, fb_c3 = st.columns([2, 1.5, 1.5])
+
+    with fb_c1:
+        selected_foam_density = st.selectbox(
+            "ความหนาแน่นโฟม (Density)",
+            list(FOAM_BLOCK_PRICES.keys()),
+            key="fb_density"
+        )
+        selected_foam_size_key = st.selectbox(
+            "ขนาดก้อนโฟมดิบ",
+            list(FOAM_SIZES.keys()),
+            key="fb_size_key"
+        )
+
+        if selected_foam_size_key == "Custom (กำหนดขนาดเอง)":
+            fb_w = st.number_input("กว้าง (มม.)", value=1000.0, step=100.0, key="fb_custom_w")
+            fb_l = st.number_input("ยาว (มม.)", value=1200.0, step=100.0, key="fb_custom_l")
+            fb_h = st.number_input("สูง (มม.)", value=2400.0, step=100.0, key="fb_custom_h")
+        else:
+            fb_w, fb_l, fb_h = FOAM_SIZES[selected_foam_size_key]
+
+    with fb_c2:
+        scrap_factor_pct = st.number_input(
+            "เผื่อขยะ/สูญเสีย Scrap Factor (%)",
+            min_value=0.0,
+            max_value=200.0,
+            value=15.0,
+            step=5.0,
+            help="เผื่อรอยตัดใบเลื่อย/ฮอตไวร์ (Blade Gap) หรือส่วนโค้งเว้าของโมเดลที่ไม่เต็มก้อน",
+            key="fb_scrap_pct"
+        )
+        unit_price_per_block = FOAM_BLOCK_PRICES[selected_foam_density]
+        st.caption(f"ราคาก้อนโฟมต่อก้อน: **฿{unit_price_per_block:,.2f}**")
+
+    # คำนวณปริมาตรและจำนวนก้อน
+    total_bbox_vol_cm3 = bbox_volume_cm3 * production_qty
+    single_block_vol_cm3 = (fb_w * fb_l * fb_h) / 1000.0
+
+    import math
+    net_blocks = total_bbox_vol_cm3 / single_block_vol_cm3 if single_block_vol_cm3 > 0 else 0.0
+    gross_blocks = net_blocks * (1.0 + (scrap_factor_pct / 100.0))
+    recommended_blocks = math.ceil(gross_blocks)
+    total_foam_cost = recommended_blocks * unit_price_per_block
+
+    with fb_c3:
+        st.metric(
+            label="แนะนำจำนวนก้อนโฟมที่ต้องใช้",
+            value=f"{recommended_blocks} ก้อน",
+            delta=f"สุทธิ {net_blocks:.2f} ก้อน (+Scrap {scrap_factor_pct:.0f}%)",
+            delta_color="off"
+        )
+        st.metric(
+            label="ประเมินราคาค่าโฟมรวม",
+            value=f"฿{total_foam_cost:,.2f}"
+        )
+
+    if st.button("➕ เพิ่มค่าโฟมก้อนนี้ลงในตารางวัสดุ", use_container_width=True, key="add_foam_block_btn"):
+        new_foam_item = {
+            "cat": "โฟมก้อน (Foam Block)",
+            "name": f"{selected_foam_density} ({selected_foam_size_key})",
+            "qty": float(recommended_blocks),
+            "unit_price": unit_price_per_block,
+            "unit_cost": unit_price_per_block,
+            "total_price": total_foam_cost,
+            "total_cost": total_foam_cost
+        }
+        st.session_state["selected_materials"].append(new_foam_item)
+        st.toast(f"เพิ่ม {selected_foam_density} จำนวน {recommended_blocks} ก้อน เรียบร้อยแล้ว")
+        st.rerun()
+    # ==========================================
     # 📦 ระบบเลือกวัสดุจาก Master Data
     # ==========================================
     st.markdown("---")
