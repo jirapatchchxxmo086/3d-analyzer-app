@@ -1315,7 +1315,7 @@ elif page == t["page_2_name"]:
     # แสดงผล Card คำนวณ
     st.info(f"💡 **คำแนะนำการสั่งซื้อ:** ชิ้นงานนี้ใช้โฟมประมาณ **{recommended_blocks_float:.1f} ก้อน** (คำนวณจากขนาดก้อนมาตรฐาน 1.0x1.2x2.4 m และรวม Scrap Factor {DEFAULT_SCRAP_PCT:.0f}% แล้ว)")
 
-    # ==========================================
+# ==========================================
     # 📦 SECTION 4: ระบบเลือกวัสดุจาก Master Data
     # ==========================================
     st.markdown("---")
@@ -1327,8 +1327,12 @@ elif page == t["page_2_name"]:
         with m_col1:
             selected_cat = st.selectbox(t["select_cat"], list(MATERIAL_MASTER_DB.keys()))
 
-        unit_price = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
-        unit_cost = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
+        with m_col2:
+            materials_in_cat = list(MATERIAL_MASTER_DB[selected_cat].keys())
+            selected_mat_item = st.selectbox(t["select_item"], materials_in_cat)
+
+            unit_price = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
+            unit_cost = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
 
         with m_col3:
             mat_qty = st.number_input(t["mat_qty"], min_value=1.0, value=1.0, step=1.0)
