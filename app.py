@@ -1297,24 +1297,24 @@ elif page == t["page_2_name"]:
             st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
             st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
 
-# ==========================================
-    # 📦 FOAM BLOCK ESTIMATOR (แสดงจำนวนก้อนโฟมที่แนะนำ)
-    # ==========================================
-    st.markdown("---")
-    st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
+# =========================================================
+# 📦 FOAM BLOCK ESTIMATOR (แสดงจำนวนก้อนโฟมที่แนะนำ)
+# =========================================================
+st.markdown("---")
+st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
 
-    # ขนาดก้อนโฟมดิบมาตรฐาน (1.0 x 1.2 x 2.4 เมตร -> มิลลิเมตร)
-    DEFAULT_BLOCK_VOL_CM3 = (1000.0 * 1200.0 * 2400.0) / 1000.0
-    DEFAULT_SCRAP_PCT = 15.0
+# ขนาดก้อนโฟมดิบมาตรฐาน (1.0 x 1.2 x 2.4 เมตร -> มิลลิเมตร)
+DEFAULT_BLOCK_VOL_CM3 = (1000.0 * 1200.0 * 2400.0) / 1000.0
+# เผื่อ Scrap Allowance + การตัดต่อก้อนโฟมทรง 3D ซับซ้อน (80%)
+SCULPTURE_3D_ALLOWANCE_PCT = 80.0
 
-    # คำนวณปริมาตรรวมและจำนวนก้อน (ทศนิยม 1 ตำแหน่ง)
-    total_bbox_vol_cm3 = bbox_volume_cm3 * production_qty
-    net_blocks = total_bbox_vol_cm3 / DEFAULT_BLOCK_VOL_CM3 if DEFAULT_BLOCK_VOL_CM3 > 0 else 0.0
-    recommended_blocks_float = net_blocks * (1.0 + (DEFAULT_SCRAP_PCT / 100.0))
+# คำนวณปริมาตรรวมและจำนวนก้อน (ทศนิยม 1 ตำแหน่ง)
+total_bbox_vol_cm3 = bbox_volume_cm3 * production_qty
+net_blocks = total_bbox_vol_cm3 / DEFAULT_BLOCK_VOL_CM3 if DEFAULT_BLOCK_VOL_CM3 > 0 else 0.0
+recommended_blocks_float = net_blocks * (1.0 + (SCULPTURE_3D_ALLOWANCE_PCT / 100.0))
 
-    # แสดงผล Card คำนวณ
-    st.info(f"💡 **คำแนะนำการสั่งซื้อ:** ชิ้นงานนี้ใช้โฟมประมาณ **{recommended_blocks_float:.1f} ก้อน** (คำนวณจากขนาดก้อนมาตรฐาน 1.0x1.2x2.4 m และรวม Scrap Factor {DEFAULT_SCRAP_PCT:.0f}% แล้ว)")
-
+# แสดงผล Card คำนวณ
+st.info(f"💡 **คำแนะนำการสั่งซื้อ:** ชิ้นงานนี้ใช้โฟมประมาณ **{recommended_blocks_float:.1f} ก้อน**")
 # ==========================================
     # 📦 SECTION 4: ระบบเลือกวัสดุจาก Master Data
     # ==========================================
