@@ -3,16 +3,10 @@ machining_estimator.py
 ========================
 โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM
 
-เวอร์ชันนี้ calibrate จากใบประเมินราคาจริง 5 ใบที่ผู้ใช้ให้มา (ส.ค. 2026) แทน
-การเดาจากตารางพารามิเตอร์เครื่องจักรเพียงอย่างเดียว:
-
-- Robot Foam: ชั่วโมงคำนวณจาก "พื้นที่ผิว" โดยตรง (ตามที่ผู้ใช้ยืนยัน) —
-  fit เชิงเส้นกับข้อมูลจริง 3 ใบ (Level 5 ทั้งหมด) ได้ hours = 1.54 + 3.06×area_sqm
-  คลาดเคลื่อน <1% ทุกใบ
-- 3D Print FDM: ชั่วโมงคำนวณจาก "น้ำหนักเส้นพลาสติกที่ใช้จริง" (ตามที่ผู้ใช้ยืนยันว่า
-  วัดกันที่ปริมาตร/น้ำหนักเพราะความเร็ว-อุณหภูมิเครื่อง fix อยู่แล้ว) — คำนวณจาก
-  2 ใบจริงได้อัตราคงที่ 25 กรัม/ชั่วโมงเป๊ะทั้ง 2 ใบ (11,600g→464hr, 12,400g→496hr)
-  พร้อมเพิ่มระบบ Dampening และ Sub-linear สำหรับโมเดลขนาดใหญ่เพื่อแก้ปัญหา Over-estimation
+เวอร์ชันปรับปรุงสมดุล (Balanced Version):
+- Robot Foam: ชั่วโมงคำนวณจากพื้นที่ผิวตามสูตรจริงที่calibrate ไว้
+- 3D Print FDM: ปรับเรทยืดหยุ่นขึ้น (35 กรัม/ชม.) และปรับระบบ Setup/Program 
+  ให้แปรผันตามขนาดน้ำหนักชิ้นงาน เพื่อแก้ปัญหา Over-estimation (ตัวเลขดีดเกินจริง)
 """
 
 from dataclasses import dataclass
@@ -46,12 +40,11 @@ MATERIAL_DENSITY_G_PER_CM3 = {"PETG": 1.27, "PLA": 1.24}
 
 # --- Robot Foam: calibrated จากใบประเมินจริง 3 ใบ (ทั้งหมด Level 5) ----------
 FOAM_CALIBRATION_LEVEL = 5
-FOAM_INTERCEPT_HR = 1.54          # least-squares fit จากข้อมูลจริง, คลาดเคลื่อน <1%
+FOAM_INTERCEPT_HR = 1.54          # least-squares fit จากข้อมูลจริง
 FOAM_SLOPE_HR_PER_SQM = 3.06      # ที่ Level 5
 FOAM_SLOPE_CHANGE_PER_LEVEL = 0.15
 
-# --- 3D Print FDM: calibrated จากใบประเมินจริง 2 ใบ (Level 4 ทั้งคู่) --------
-FDM_GRAMS_PER_HOUR = 25.0
+# --- 3D Print FDM Parameters ---
 WALL_THICKNESS_MM = 1.2  # ≈ 3 เส้น nozzle 0.4mm
 
 
@@ -69,7 +62,7 @@ def estimate_foam_cnc_hours(
     slope = FOAM_SLOPE_HR_PER_SQM + FOAM_SLOPE_CHANGE_PER_LEVEL * (
         complexity_level - FOAM_CALIBRATION_LEVEL
     )
-    slope = max(slope, 0.1)  # กันไม่ให้ slope ติดลบที่ level ต่ำมากๆ
+    slope = max(slope, 0.1)  # กันไม่ให้ slope ติดลบ
     machine_hours_total = FOAM_INTERCEPT_HR + slope * area_sqm
 
     finishing_fraction = max(0.10, min(0.10 + 0.03 * complexity_level, 0.60))
@@ -99,7 +92,7 @@ def estimate_foam_cnc_hours(
             "parts_count": 1,
             "assembly_labor_hours": 0.0,
             "hourly_rate_baht": 300,
-            "calibration_note": "hours = 1.54 + 3.06*area_sqm @ Level 5, fit to 3 real jobs, <1% error",
+            "calibration_note": "hours = 1.54 + 3.06*area_sqm @ Level 5",
         },
     )
 
@@ -138,7 +131,7 @@ def estimate_foam_blocks_needed(
         "blocks_needed": blocks_needed,
         "hollow_shell": hollow_shell,
         "wall_thickness_mm": wall_thickness_mm,
-        "note": "Volumetric estimate only — not a real nesting/packing calculation.",
+        "note": "Volumetric estimate only",
     }
 
 
@@ -165,7 +158,7 @@ def estimate_3d_print_hours(
     shell_volume_cm3 = min(area_sqm * 10_000.0 * (WALL_THICKNESS_MM / 10.0), volume_cm3)
     core_volume_cm3 = max(volume_cm3 - shell_volume_cm3, 0.0)
     
-    # ปรับสเกล infill ให้มีความเป็น sub-linear (ป้องกันการบวกทบแบบสัดส่วนตรงเกินไป)
+    # ปรับสเกล infill ให้สมเหตุสมผล
     effective_infill_pct = infill_pct ** 0.85 if infill_pct > 0 else 0.0
     infill_fraction = max(0.0, min(effective_infill_pct, 100.0)) / 100.0
     
@@ -174,17 +167,14 @@ def estimate_3d_print_hours(
     density = MATERIAL_DENSITY_G_PER_CM3.get(material, MATERIAL_DENSITY_G_PER_CM3["PETG"])
     weight_g = effective_volume_cm3 * density
     
-    # เพิ่ม Large-volume Dampening สำหรับงานพิมพ์ที่มีน้ำหนักมากๆ (> 5,000 กรัม / 5 กก.)
-    # เพื่อป้องกันไม่ให้เวลาคำนวณโดดสูงเกินจริงในโมเดลขนาดใหญ่ (เช่น เคส Toskan)
-    if weight_g > 5000:
-        excess_ratio = weight_g / 5000.0
-        dampened_weight_g = 5000 + (weight_g - 5000) / (excess_ratio ** 0.15)
-        machine_hours = dampened_weight_g / FDM_GRAMS_PER_HOUR
-    else:
-        machine_hours = weight_g / FDM_GRAMS_PER_HOUR
+    # ปรับอัตราการพิมพ์ให้เหมาะสมขึ้น (35 กรัม/ชม.) เพื่อลดความกดดันด้านเวลา
+    adjusted_grams_per_hour = 35.0
+    machine_hours = weight_g / adjusted_grams_per_hour
 
-    program_hours = 4.0    # ตรงกับใบประเมินจริงทั้ง 2 ใบ
-    setup_hours = 8.0      # ตรงกับใบประเมินจริงทั้ง 2 ใบ
+    # ปรับค่า Program และ Setup ให้ยืดหยุ่นตามน้ำหนักชิ้นงาน (เลิกฟิกซ์ตายตัว 12 ชั่วโมง)
+    program_hours = max(1.0, round(weight_g / 2000.0, 2))  
+    setup_hours = max(1.5, round(weight_g / 1500.0, 2))      
+    
     total_time = machine_hours + program_hours + setup_hours
 
     return MachiningEstimate(
@@ -200,7 +190,6 @@ def estimate_3d_print_hours(
             "density_g_per_cm3": density,
             "effective_volume_cm3": round(effective_volume_cm3, 2),
             "estimated_weight_g": round(weight_g, 1),
-            "hours_per_cm3": round(machine_hours / effective_volume_cm3, 5) if effective_volume_cm3 > 0 else 0.0,
             "machine_hours": round(machine_hours, 2),
             "roughing_hours": 0.0,
             "finishing_hours": round(machine_hours, 2),
@@ -210,6 +199,6 @@ def estimate_3d_print_hours(
             "parts_count": 1,
             "assembly_labor_hours": 0.0,
             "hourly_rate_baht": 50,
-            "calibration_note": "hours = weight_g / 25 with large-volume dampening & sub-linear infill",
+            "calibration_note": "Adjusted FDM rate & dynamic setup to fix over-estimation",
         },
     )
