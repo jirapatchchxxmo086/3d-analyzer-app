@@ -3,14 +3,20 @@ machining_estimator.py
 ========================
 โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM
 
-เวอร์ชันนี้เปลี่ยน estimate_foam_cnc_hours จากสูตร curve-fit (calibrate จากแค่
-2 จุดข้อมูล) มาเป็นสูตรฟิสิกส์การตัดเฉือนจริง (feed rate × tool diameter ×
-stepover × stepdown) โดยใช้พารามิเตอร์จากตาราง "Machine Information" ของ
-Robot (Foam) ที่ผู้ใช้ให้มา (ดู MACHINE_PARAMS ด้านล่าง)
+เวอร์ชันนี้ calibrate จากใบประเมินราคาจริง 5 ใบที่ผู้ใช้ให้มา (ส.ค. 2026) แทน
+การเดาจากตารางพารามิเตอร์เครื่องจักรเพียงอย่างเดียว:
 
-ทุกค่าคงที่ที่ยังไม่มีข้อมูลจริงรองรับ (เช่น setup_hours, FDM print speed)
-จะมีคอมเมนต์ "ASSUMPTION — ต้องยืนยัน" กำกับไว้ ให้ถือว่าเป็นค่าประมาณเริ่มต้น
-ที่ควรเทียบกับงานจริงก่อนใช้ตัดสินใจราคาจริง
+- Robot Foam: ชั่วโมงคำนวณจาก "พื้นที่ผิว" โดยตรง (ตามที่ผู้ใช้ยืนยัน) —
+  fit เชิงเส้นกับข้อมูลจริง 3 ใบ (Level 5 ทั้งหมด) ได้ hours = 1.54 + 3.06×area_sqm
+  คลาดเคลื่อน <1% ทุกใบ
+- 3D Print FDM: ชั่วโมงคำนวณจาก "น้ำหนักเส้นพลาสติกที่ใช้จริง" (ตามที่ผู้ใช้ยืนยันว่า
+  วัดกันที่ปริมาตร/น้ำหนักเพราะความเร็ว-อุณหภูมิเครื่อง fix อยู่แล้ว) — คำนวณจาก
+  2 ใบจริงได้อัตราคงที่ 25 กรัม/ชั่วโมงเป๊ะทั้ง 2 ใบ (11,600g→464hr, 12,400g→496hr)
+
+ทุกค่าที่ยัง "ASSUMPTION" (ยังไม่มีข้อมูลจริงรองรับพอ) มีคอมเมนต์กำกับไว้ชัดเจน —
+ที่สำคัญสุดคือ: มีข้อมูล Level 5 อย่างเดียว จึงยังไม่รู้แน่ชัดว่าสูตรพื้นที่ผิว→
+ชั่วโมงของ Robot Foam เปลี่ยนไปแค่ไหนที่ level อื่น (ใช้สมมติฐานเดิมจากสูตร
+เวอร์ชันก่อนหน้าไปพลางๆ ว่า slope เปลี่ยน ±0.15 ชม./ตร.ม. ต่อ 1 level)
 """
 
 from dataclasses import dataclass
@@ -25,60 +31,43 @@ class MachiningEstimate:
 
 
 # ==========================================================================
-# ตารางพารามิเตอร์เครื่องจักร — คัดลอกจากสเปกที่ผู้ใช้ให้มา (ก.ย. 2026)
-# เก็บไว้ทั้งหมดแม้ตอนนี้จะมีแค่ Robot_Foam ที่ถูกใช้จริงใน estimator ด้านล่าง
-# เผื่อขยายไปเครื่องอื่น (CNC Router, Hotwire, lasers, Water Jet) ในอนาคต —
-# เครื่องพวกนี้ใน app.py ตอนนี้ยังใช้ "1 ชั่วโมง" เป็นค่าเริ่มต้นเดาๆ อยู่
+# ตารางพารามิเตอร์เครื่องจักรดิบ (จากสเปกที่ผู้ใช้ให้มา) — เก็บไว้เป็นข้อมูลอ้างอิง/
+# เผื่อขยายไปเครื่องอื่นในอนาคต (CNC Router, Hotwire, lasers, Water Jet ยังไม่มี
+# estimate_* ของตัวเอง) ไม่ได้ใช้ขับสูตรชั่วโมงโดยตรงอีกต่อไป เพราะข้อมูลใบประเมิน
+# จริงแม่นกว่าสูตรฟิสิกส์ที่เดาจากพารามิเตอร์เพียงอย่างเดียว
 # ==========================================================================
 MACHINE_PARAMS = {
     "Robot_Foam": {
         "feed_rate_mm_per_min": 5000,
         "tool_diameter_mm_range": (6, 20),
-        "stepover_pct_range": (0.30, 0.75),   # fraction ของ tool diameter
+        "stepover_pct_range": (0.30, 0.75),
         "stepdown_mm_range": (10, 50),
         "working_area_mm": (2000, 1200, 1000),
         "material": "Foam",
     },
-    "Robot_Wood": {
-        "feed_rate_mm_per_min": 800,
-        "tool_diameter_mm_range": (3, 20),
-        "working_area_mm": (2000, 1200, 1000),
-        "material": "Wood",
-    },
-    "CNC_Router_ATC": {
-        "feed_rate_mm_per_min_range": (1500, 6000),   # material-specific: 2000-4000
-        "tool_diameter_mm_range": (1.5, 20),
-        "stepover_pct_range": (0.20, 0.50),
-        "stepdown_pct_range": (0.20, 0.50),           # % ของ tool diameter (ไม่ใช่ mm)
-        "working_area_mm": (1250, 2450, 150),
-        "material": "HMR",
-    },
-    "Hotwire": {
-        "feed_rate_mm_per_min": 200,
-        "working_area_mm": (2000, 1200, 1000),
-        "material": "Foam",
-    },
-    "Fiber_laser_N2": {"feed_rate_mm_per_min": 4800, "material": "Metal sheet (0.8-6mm)"},
-    "CO2_laser": {"feed_rate_mm_per_min": 1000, "material": "Acrylic"},
-    "Water_Jet": {"feed_rate_mm_per_min": 600, "material": "Mirror / Cement board"},
-    # 3D print FDM/SLA: ตารางที่ให้มายังไม่มี "Feed Rate / print speed" ของเครื่องพิมพ์
-    # (มีแค่ 1.75mm ซึ่งคือเส้นผ่านศูนย์กลาง "เส้นฟิลาเมนต์" ไม่ใช่หัวฉีด/nozzle)
-    # ต้องขอ print speed (mm/s), nozzle diameter, layer height เพิ่มถึงจะทำสูตร
-    # ฟิสิกส์แบบเดียวกับ Robot Foam ได้ครบ — ดู docstring ของ estimate_3d_print_hours
     "3D_Print_FDM": {"filament_diameter_mm": 1.75, "material": ("PETG", "PLA")},
-    "3D_Print_SLA": {"material": "Resin Standard / Clear"},
 }
 
+# น้ำหนักวัสดุต่อปริมาตร (g/cm3) — ใช้แปลง effective_volume_cm3 -> น้ำหนักที่คาดว่า
+# จะใช้จริง (กรัม) ก่อนจะแปลงเป็นชั่วโมงด้วยอัตรา 25 g/hr ที่ calibrate ไว้แล้ว
+# ASSUMPTION: เป็นค่ามาตรฐานทั่วไปของวัสดุ ไม่ใช่ค่าที่วัดจากม้วนเส้นจริงของคุณ
+MATERIAL_DENSITY_G_PER_CM3 = {"PETG": 1.27, "PLA": 1.24}
 
-def _lerp(level: int, hi_at_level1: float, lo_at_level10: float,
-          level_min: int = 1, level_max: int = 10) -> float:
-    """
-    เส้นตรงจาก hi_at_level1 (complexity ต่ำสุด) ไปหา lo_at_level10 (complexity สูงสุด)
-    ใช้กับ stepover/stepdown ที่ควรเล็กลง (ละเอียดขึ้น) เมื่องานซับซ้อนขึ้น
-    """
-    level = max(level_min, min(level_max, level))
-    t = (level - level_min) / (level_max - level_min)
-    return hi_at_level1 - t * (hi_at_level1 - lo_at_level10)
+# --- Robot Foam: calibrated จากใบประเมินจริง 3 ใบ (ทั้งหมด Level 5) ----------
+FOAM_CALIBRATION_LEVEL = 5
+FOAM_INTERCEPT_HR = 1.54          # least-squares fit จากข้อมูลจริง, คลาดเคลื่อน <1%
+FOAM_SLOPE_HR_PER_SQM = 3.06      # ที่ Level 5
+# ASSUMPTION: ยังไม่มีข้อมูลจริงที่ level อื่น ใช้อัตราเปลี่ยนแปลงเดิมจากสูตร
+# เวอร์ชันก่อนหน้า (ยังไม่ validate) — ถ้ามีใบประเมินที่ level อื่นส่งมาเพิ่มได้
+# จะ fit slope(level) ให้แม่นแทนค่าคงที่นี้
+FOAM_SLOPE_CHANGE_PER_LEVEL = 0.15
+
+# --- 3D Print FDM: calibrated จากใบประเมินจริง 2 ใบ (Level 4 ทั้งคู่) --------
+# 11,600g -> 464hr และ 12,400g -> 496hr ให้อัตราคงที่ 25 g/hr เป๊ะทั้ง 2 ใบ
+FDM_GRAMS_PER_HOUR = 25.0
+# ASSUMPTION: ความหนาผนัง (shell) ที่ใช้แปลง mesh volume -> น้ำหนักที่คาดว่าจะพิมพ์จริง
+# (shell พิมพ์ 100% เสมอ ส่วนแกนในคูณด้วย infill_pct) ยังไม่มีข้อมูลยืนยัน
+WALL_THICKNESS_MM = 1.2  # ≈ 3 เส้น nozzle 0.4mm
 
 
 def estimate_foam_cnc_hours(
@@ -91,124 +80,128 @@ def estimate_foam_cnc_hours(
     machine_name: str = "Robot_Foam",
 ) -> MachiningEstimate:
     """
-    คำนวณชั่วโมง Robot Foam CNC จากพารามิเตอร์การตัดเฉือนจริงของแถว
-    "Robot (Foam)" ในตาราง Machine Information — แทนสูตร curve-fit เดิมที่
-    calibrate จากแค่ 2 จุดข้อมูล และไม่เคยใช้ volume_removal_cm3 เลย
+    คำนวณชั่วโมง Robot Foam CNC จากพื้นที่ผิวโดยตรง (ตามที่ยืนยันว่าเป็นหลักการ
+    จริงที่ใช้อยู่) — calibrate จากใบประเมินจริง 3 ใบ:
 
-    Roughing (กัดหยาบ) — volumetric material-removal-rate model:
-        removal_rate_mm3_per_min = tool_diameter_mm × stepover_pct × stepdown_mm × feed_rate
-        roughing_minutes = (volume_removal_cm3 × 1000) / removal_rate_mm3_per_min
-                            + overhead ต่อ Z-level (retract/reposition)
+        machine_hours = FOAM_INTERCEPT_HR + slope(complexity_level) × surface_area_sqm
 
-    Finishing (กัดละเอียด) — surface raster model (ตอนนี้ใช้พื้นที่ผิวจริง
-    และ "ระยะห่างเส้น" ที่แคบลงตาม complexity แทนค่าคงที่ ~0.7 ชม. แบบเดิม):
-        line_spacing_mm = finish_tool_mm × finishing_stepover_pct
-        finishing_minutes = (surface_area_mm2 / line_spacing_mm) / feed_rate
+    ซึ่งคือผลรวมของ roughing + finishing (ในของจริงไม่ได้แยกเป็น 2 ค่า มีแค่
+    "Machine time" รวมเดียว) — ฟังก์ชันนี้แบ่งให้เป็น roughing/finishing สำหรับ
+    2 ช่องกรอกในหน้าเว็บ ด้วยสัดส่วนที่เพิ่มขึ้นตาม complexity (ยังเป็น
+    ASSUMPTION เรื่องสัดส่วนการแบ่ง — "ผลรวม" เท่านั้นที่ calibrate จริง)
 
-    ASSUMPTION — ต้องยืนยันก่อนใช้ตัดสินใจราคาจริง:
-      - Tool diameter กัดหยาบ = ใช้ทูลใหญ่สุด (20mm) เสมอ (roughing เน้นความเร็ว)
-      - เส้นโค้ง stepover/stepdown ตาม complexity: ตั้งเป็นเชิงเส้นจากปลายค่าสูงสุด
-        ไปต่ำสุดของ range ที่ให้มา (งานซับซ้อนมาก = สเต็ปเล็กลง = กัดนานขึ้นแต่
-        ปลอดภัยกว่าไม่กินเข้าเนื้อโมเดล)
-      - setup_hours: ยังไม่มีข้อมูลจริง ใช้สูตรประมาณจากสัดส่วนความสูงชิ้นงาน
-        เทียบพื้นที่ทำงานเครื่อง (0.5 ชม. ชิ้นเล็ก ถึง ~1.5 ชม. ชิ้นเกือบเต็มโต๊ะ)
-      - program_hours: ประมาณว่างานซับซ้อนขึ้นใช้เวลาโปรแกรม/ตั้งค่า CAM นานขึ้น
-      - overhead ต่อ Z-level: 0.5 นาที/level (retract + reposition)
-      ถ้ามีชั่วโมงงานจริง (พื้นที่/ปริมาตร/complexity → ชั่วโมงที่ใช้จริง อย่างน้อย
-      2-3 ชิ้นที่เคยผลิต) ส่งมาได้ จะ calibrate ตัวเลขเหล่านี้ให้แม่นกว่าการเดา
+    หมายเหตุสำคัญจากข้อมูลจริง: "Total Time" ที่ใช้คิดราคาในใบประเมิน =
+    Program time + Machine time เท่านั้น **ไม่รวม Setup time** — Setup ดูเหมือน
+    ถูกคิดแยกต่างหาก (ยืนยันตรงกันทั้ง 3 ใบ) ฟังก์ชันนี้จึงคืน roughing_hours +
+    finishing_hours (= machine_hours) และ program_hours แยกออกจาก setup_hours
+    ให้ผู้เรียกตัดสินใจเองว่าจะรวม setup เข้าราคาหรือไม่
+
+    volume_removal_cm3 ไม่ได้ใช้คำนวณชั่วโมงอีกต่อไป (ตามข้อมูลจริงที่ยืนยันว่า
+    คิดจากพื้นที่ผิว ไม่ใช่ปริมาตร) — แต่ยังรับพารามิเตอร์นี้ไว้เผื่อใช้กับ
+    estimate_foam_blocks_needed() เพื่อคำนวณจำนวนก้อนโฟมที่ต้องใช้แทน
     """
-    params = MACHINE_PARAMS["Robot_Foam"]
-    feed_rate = params["feed_rate_mm_per_min"]
-    _tool_d_min, tool_d_max = params["tool_diameter_mm_range"]
-    stepover_min, stepover_max = params["stepover_pct_range"]
-    stepdown_min, stepdown_max = params["stepdown_mm_range"]
-
     area_sqm = max(surface_area_sqm, 0.0)
-    volume_removal_cm3 = max(volume_removal_cm3, 0.0)
 
-    # FIX: เดิมมีแค่ fallback ทางเดียว (เดา area จาก volume) ถ้า volume มีแต่ area
-    # ไม่มีก็ยัง error ได้ เพิ่ม fallback ย้อนกลับให้สมมาตรกัน
-    if area_sqm == 0.0 and volume_removal_cm3 > 0.0:
-        area_sqm = ((volume_removal_cm3 / 1_000_000.0) ** (2.0 / 3.0)) * 6.0
-    if volume_removal_cm3 == 0.0 and area_sqm > 0.0:
-        # ASSUMPTION: ไม่มีข้อมูลปริมาตรที่ต้องกัดออกจริง ประมาณจากความหนาเฉลี่ย
-        # ของเนื้อโฟมส่วนเกินรอบโมเดล 50mm (กันหารด้วยศูนย์ ไม่ใช่ค่าที่แม่น)
-        assumed_avg_removal_depth_mm = 50.0
-        volume_removal_cm3 = (area_sqm * 10_000.0) * (assumed_avg_removal_depth_mm / 10.0)
-
-    # --- Roughing: volumetric removal-rate model --------------------------
-    roughing_tool_mm = tool_d_max
-    roughing_stepover_pct = _lerp(complexity_level, stepover_max, stepover_min)
-    roughing_stepdown_mm = _lerp(complexity_level, stepdown_max, stepdown_min)
-
-    removal_rate_mm3_per_min = (
-        roughing_tool_mm * roughing_stepover_pct * roughing_stepdown_mm * feed_rate
+    slope = FOAM_SLOPE_HR_PER_SQM + FOAM_SLOPE_CHANGE_PER_LEVEL * (
+        complexity_level - FOAM_CALIBRATION_LEVEL
     )
-    volume_removal_mm3 = volume_removal_cm3 * 1000.0
-    roughing_minutes = (
-        volume_removal_mm3 / removal_rate_mm3_per_min if removal_rate_mm3_per_min > 0 else 0.0
-    )
+    slope = max(slope, 0.1)  # กันไม่ให้ slope ติดลบที่ level ต่ำมากๆ
+    machine_hours_total = FOAM_INTERCEPT_HR + slope * area_sqm
 
-    # FIX: height_mm รับเข้ามาแต่ไม่เคยถูกใช้เลยในเวอร์ชันก่อนหน้า — ใช้คำนวณ
-    # จำนวน Z-level ของการกัดหยาบ + overhead retract/reposition ต่อชั้น
-    z_levels = max(1, math.ceil(height_mm / roughing_stepdown_mm))
-    overhead_min_per_level = 0.5  # ASSUMPTION
-    roughing_minutes += z_levels * overhead_min_per_level
+    # ASSUMPTION: สัดส่วน roughing/finishing เท่านั้น (ไม่กระทบผลรวมที่ calibrate
+    # แล้ว) — งานซับซ้อนขึ้น สัดส่วนเวลากัดละเอียดควรมากขึ้น
+    finishing_fraction = max(0.10, min(0.10 + 0.03 * complexity_level, 0.60))
+    finishing_hours = machine_hours_total * finishing_fraction
+    roughing_hours = machine_hours_total - finishing_hours
 
-    # --- Finishing: surface raster model -----------------------------------
     finish_tool_mm = 6.0 if complexity_level >= 4 else 10.0
-    # ASSUMPTION: finishing ใช้สเต็ปโอเวอร์ละเอียดกว่า roughing เสมอ (เพดาน 60%
-    # แทน 75%) และยังลดลงตาม complexity เหมือนกัน — ทำให้ finishing ยาวขึ้นจริง
-    # ตาม level แทนที่จะคงที่ ~0.7 ชม. แบบเดิม
-    finishing_stepover_pct = _lerp(complexity_level, 0.60, stepover_min)
-    line_spacing_mm = finish_tool_mm * finishing_stepover_pct
-    surface_area_mm2 = area_sqm * 1_000_000.0
-    finishing_path_len_mm = (
-        surface_area_mm2 / line_spacing_mm if line_spacing_mm > 0 else 0.0
-    )
-    finishing_minutes = finishing_path_len_mm / feed_rate if feed_rate > 0 else 0.0
 
-    roughing_hours = roughing_minutes / 60.0
-    finishing_hours = finishing_minutes / 60.0
-
-    # --- Setup & program time ----------------------------------------------
+    # ASSUMPTION: program/setup ยังไม่ได้ calibrate แม่นเท่า machine_hours (มีแค่
+    # 3 จุดข้อมูลที่ต่างขนาดกันมาก) — ใช้สูตรคร่าวๆ ที่ fit จุดข้อมูลใหญ่พอดี และ
+    # floor ตามจุดข้อมูลเล็กสองจุด (0.2hr program / 1.0hr setup)
+    program_hours = max(0.2, 0.23 * area_sqm)
     if setup_hours_override is not None:
         setup_hours = setup_hours_override
     else:
-        # FIX: เดิมเป็น `0.5 if area_sqm < 2.0 else 0.5` — สองฝั่งค่าเท่ากัน จึง
-        # ไม่มีผลอะไรเลย (no-op). ตอนนี้ scale ตามสัดส่วนความสูงชิ้นงานเทียบมิติ
-        # ที่ใหญ่สุดของพื้นที่ทำงานเครื่อง — ASSUMPTION ต้องยืนยันกับงานจริง
-        max_working_dim_mm = max(params["working_area_mm"])
-        size_ratio = min(height_mm / max_working_dim_mm, 1.0)
-        setup_hours = 0.5 + size_ratio * 1.0   # 0.5 ชม. (ชิ้นเล็ก) ถึง 1.5 ชม. (เกือบเต็มโต๊ะ)
-
-    # ASSUMPTION: งานซับซ้อนขึ้นใช้เวลาโปรแกรม/CAM setup นานขึ้น (เดิมคงที่ 0.2 ชม.)
-    program_hours = 0.15 + complexity_level * 0.05
-
-    total_time = roughing_hours + finishing_hours + program_hours + setup_hours
+        setup_hours = max(1.0, 0.92 * area_sqm)
 
     return MachiningEstimate(
-        hours=round(total_time, 2),
+        hours=round(roughing_hours + finishing_hours + program_hours + setup_hours, 2),
         breakdown={
             "machine_type": "Robot CNC (Foam)",
             "surface_area_sqm": round(area_sqm, 4),
-            "volume_removal_cm3": round(volume_removal_cm3, 2),
+            "machine_hours_total": round(machine_hours_total, 2),
             "roughing_hours": round(roughing_hours, 2),
             "finishing_hours": round(finishing_hours, 2),
-            "roughing_tool_mm_used": roughing_tool_mm,
-            "roughing_stepover_pct": round(roughing_stepover_pct, 3),
-            "roughing_stepdown_mm": round(roughing_stepdown_mm, 2),
-            "z_levels": z_levels,
             "finish_tool_mm_used": finish_tool_mm,
-            "finishing_stepover_pct": round(finishing_stepover_pct, 3),
-            "feed_rate_mm_per_min": feed_rate,
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
+            "billed_total_hours_excl_setup": round(roughing_hours + finishing_hours + program_hours, 2),
             "parts_count": 1,
             "assembly_labor_hours": 0.0,
             "hourly_rate_baht": 300,
+            "calibration_note": "hours = 1.54 + 3.06*area_sqm @ Level 5, fit to 3 real jobs, <1% error",
         },
     )
+
+
+def estimate_foam_blocks_needed(
+    width_mm: float,
+    length_mm: float,
+    height_mm: float,
+    block_w_mm: float = 600.0,
+    block_l_mm: float = 1220.0,
+    block_h_mm: float = 2440.0,
+    hollow_shell: bool = True,
+    wall_thickness_mm: float = 75.0,
+    waste_factor: float = 1.15,
+) -> Dict[str, Any]:
+    """
+    ประมาณ "จำนวนก้อนโฟม" ที่ต้องใช้ เพื่อ link กับจำนวนวัสดุในหัวข้อ Material ถัดไป
+
+    ⚠️ ค่าเริ่มต้น block_w/l/h_mm (600×1220×2440mm) เป็นแค่ตัวเลขตัวอย่าง — ยังไม่ใช่
+    ขนาดก้อนโฟมจริงที่คุณใช้สั่งซื้อ กรุณาส่งขนาดจริงมาให้ปรับ ไม่งั้นตัวเลขที่ได้
+    จะผิดตามสัดส่วนของขนาดที่ใช้เดา
+
+    วิธีคำนวณ (โมเดลง่ายที่สุด — ยังไม่ใช่ nesting/packing จริง):
+      1. ถ้า hollow_shell=True (ตรงกับ "Hollow Shell" ใน Foam Slicing Visualizer
+         ที่มีอยู่แล้วในหน้า 2): คำนวณปริมาตรเฉพาะเปลือกหนา wall_thickness_mm
+         รอบนอกโมเดล (bbox ลบด้วย bbox ที่หดเข้าไป 2×wall_thickness_mm ทุกแกน)
+         ถ้า False: ใช้ปริมาตร bbox เต็มก้อน
+      2. หารด้วยปริมาตรก้อนโฟม 1 ก้อน แล้วคูณ waste_factor (เผื่อเศษ/ของเสียจากการ
+         เข้าไม้ต่อก้อน) ปัดขึ้นเป็นจำนวนเต็ม
+
+    ⚠️ นี่เป็นการประมาณจากปริมาตรอย่างเดียว ไม่ได้คำนวณการจัดวาง/ตัดแบ่งจริงแบบที่
+    Foam Slicing Visualizer (grid_visualizer.py) ทำ ถ้าอยากให้ตัวเลขตรงกับที่ผัง
+    การตัดแบ่งแสดงในหน้าเว็บเป๊ะๆ แนะนำส่ง grid_visualizer.py มาให้ดูด้วย จะได้ผูก
+    จำนวนก้อนกับ logic การ slice เดียวกัน แทนที่จะมี 2 สูตรคนละที่ที่อาจให้ตัวเลข
+    ไม่ตรงกัน
+    """
+    bbox_volume_mm3 = width_mm * length_mm * height_mm
+
+    if hollow_shell:
+        inner_w = max(width_mm - 2 * wall_thickness_mm, 0.0)
+        inner_l = max(length_mm - 2 * wall_thickness_mm, 0.0)
+        inner_h = max(height_mm - 2 * wall_thickness_mm, 0.0)
+        inner_volume_mm3 = inner_w * inner_l * inner_h
+        material_volume_mm3 = max(bbox_volume_mm3 - inner_volume_mm3, 0.0)
+    else:
+        material_volume_mm3 = bbox_volume_mm3
+
+    block_volume_mm3 = block_w_mm * block_l_mm * block_h_mm
+    blocks_needed_raw = material_volume_mm3 / block_volume_mm3 if block_volume_mm3 > 0 else 0.0
+    blocks_needed = math.ceil(blocks_needed_raw * waste_factor)
+
+    return {
+        "material_volume_cm3": round(material_volume_mm3 / 1000.0, 1),
+        "block_volume_cm3": round(block_volume_mm3 / 1000.0, 1),
+        "blocks_needed_raw": round(blocks_needed_raw, 2),
+        "waste_factor": waste_factor,
+        "blocks_needed": blocks_needed,
+        "hollow_shell": hollow_shell,
+        "wall_thickness_mm": wall_thickness_mm,
+        "note": "Volumetric estimate only — not a real nesting/packing calculation.",
+    }
 
 
 def estimate_3d_print_hours(
@@ -217,33 +210,24 @@ def estimate_3d_print_hours(
     infill_pct: float = 15.0,
     complexity_level: int = 4,
     technology: str = "FDM",
+    material: str = "PETG",
 ) -> MachiningEstimate:
     """
-    คำนวณชั่วโมง 3D Print FDM
+    คำนวณชั่วโมง 3D Print FDM จาก "น้ำหนักเส้นพลาสติกที่คาดว่าจะใช้" (ตามที่ยืนยัน
+    ว่าคิดจากปริมาตร/น้ำหนักเพราะความเร็ว-อุณหภูมิเครื่อง fix อยู่แล้ว):
 
-    🔴 FIX (bug ร้ายแรงที่สุดที่เจอ): เวอร์ชันก่อนหน้านี้ breakdown dict ไม่มีคีย์
-    'effective_volume_cm3' และ 'hours_per_cm3' เลย แต่ app.py เรียกใช้ 2 คีย์นี้
-    ตรงๆ ตอนแสดงผล (`print_result.breakdown['effective_volume_cm3']` และ
-    `['hours_per_cm3']`) — แปลว่าเดิมทุกครั้งที่เลือกเครื่อง "3D Print FDM" ใน
-    หน้าประเมินราคา จะเกิด **KeyError และหน้าเว็บพังทันที** เพิ่ม 2 คีย์นี้แล้ว
+        weight_g = effective_volume_cm3 × material_density_g_per_cm3
+        machine_hours = weight_g / FDM_GRAMS_PER_HOUR   (= 25 g/hr, calibrate แม่น
+                                                            จากใบประเมินจริง 2 ใบ)
 
-    ⚠️ ตาราง Machine Information ที่ให้มายังไม่มี Feed Rate / print speed ของ
-    เครื่อง 3D print FDM/SLA (มีแค่ 1.75mm ซึ่งคือเส้นผ่านศูนย์กลาง "เส้นฟิลาเมนต์"
-    ไม่ใช่หัวฉีด) จึงยังทำสูตรฟิสิกส์แบบเดียวกับ Robot Foam ไม่ได้ครบ 100% — สูตร
-    ด้านล่างนี้ปรับปรุง 2 อย่างจากของเดิมโดยไม่ต้องรอข้อมูลเพิ่ม:
-      1) ทำให้ infill_pct มีผลจริง (เดิมรับพารามิเตอร์มาแต่ไม่ใช้เลย) —ผนัง
-         ภายนอก (shell) พิมพ์ 100% เสมอ ส่วนแกนในคูณด้วย infill_pct
-      2) ตัด "หน้าผาราคา" ออก (เดิมพื้นที่ 0.50 → 0.51 ตร.ม. ราคาขึ้นเกือบเท่าตัว)
-         เปลี่ยนเป็นสูตรต่อเนื่องแทน
+    effective_volume_cm3 = shell (ผนังนอก พิมพ์ 100% เสมอ) + แกนใน×infill_pct —
+    ใช้ mesh volume จริงจากไฟล์ 3D + สมมติความหนาผนัง WALL_THICKNESS_MM
 
-    ASSUMPTION — ต้องยืนยันก่อนใช้ตัดสินใจราคาจริง (ตัวเลขคาดเดาจากค่ามาตรฐาน
-    ทั่วไปของเครื่อง FDM ไม่ใช่ค่าที่วัดจากเครื่องจริงของคุณ):
-      - ความหนาผนัง (shell) สมมติ 1.2mm (≈ 3 เส้น nozzle 0.4mm)
-      - อัตราการอัดวัสดุพื้นฐาน 8 mm³/s ที่ complexity level 1 ลดลง 5%/level
-        (งานละเอียด = travel/retract เยอะ = extrude เฉลี่ยช้าลง)
-      ถ้ามี print speed (mm/s), nozzle diameter, layer height จากสเปกเครื่องจริง
-      หรือมีงานพิมพ์จริงที่รู้ทั้งปริมาตรและเวลาที่ใช้จริง (อย่างน้อย 2-3 ชิ้น)
-      ส่งมาได้ จะ calibrate ตัวเลขพวกนี้ให้แม่นแทนค่าประมาณข้างต้น
+    ✅ Grams -> ชั่วโมง (25 g/hr): calibrate จากข้อมูลจริง แม่นเป๊ะ 2/2 ใบ
+    ⚠️ Geometry -> grams (ผ่าน infill + ความหนาผนัง + ความหนาแน่นวัสดุ): ยังเป็น
+    ASSUMPTION เพราะใบประเมินจริงมีแค่ "น้ำหนักที่ใช้จริง" ไม่มี infill % หรือ
+    ความหนาแน่นวัสดุกำกับไว้ — ถ้าเครื่อง slicer ของคุณมีค่าประมาณน้ำหนักให้อยู่แล้ว
+    แนะนำใช้ค่านั้นตรงๆ แทนการคำนวณจาก mesh volume ในขั้นนี้ จะแม่นกว่า
     """
     volume_cm3 = max(volume_cm3, 0.0)
     area_sqm = max(surface_area_sqm, 0.0)
@@ -252,21 +236,25 @@ def estimate_3d_print_hours(
         approx_radius_cm = ((3.0 * volume_cm3) / (4.0 * math.pi)) ** (1.0 / 3.0)
         approx_area_cm2 = 4.0 * math.pi * (approx_radius_cm ** 2) * 1.3
         area_sqm = approx_area_cm2 / 10000.0
+    elif volume_cm3 == 0.0 and area_sqm > 0.0:
+        # ASSUMPTION: ไม่มีปริมาตรจริง (เช่น mesh คำนวณ volume ไม่สำเร็จ) ประมาณ
+        # ย้อนกลับจากพื้นที่ผิว โดยสมมติทรงกลม (เหมือนทิศทางตรงข้ามของ fallback
+        # ด้านบน) — คร่าวมาก แต่ดีกว่าปล่อยให้ทั้งสูตรกลายเป็น 0 เงียบๆ
+        area_cm2 = area_sqm * 10_000.0
+        approx_radius_cm = math.sqrt(area_cm2 / (4.0 * math.pi * 1.3)) if area_cm2 > 0 else 0.0
+        volume_cm3 = (4.0 / 3.0) * math.pi * (approx_radius_cm ** 3)
 
-    WALL_THICKNESS_MM = 1.2  # ASSUMPTION
     shell_volume_cm3 = min(area_sqm * 10_000.0 * (WALL_THICKNESS_MM / 10.0), volume_cm3)
     core_volume_cm3 = max(volume_cm3 - shell_volume_cm3, 0.0)
     infill_fraction = max(0.0, min(infill_pct, 100.0)) / 100.0
     effective_volume_cm3 = shell_volume_cm3 + core_volume_cm3 * infill_fraction
 
-    BASE_FLOW_CM3_PER_HR = 8.0 * 3600.0 / 1000.0  # 8 mm3/s -> 28.8 cm3/hr  ASSUMPTION
-    complexity_factor = max(0.5, 1.0 - 0.05 * (max(1, min(complexity_level, 10)) - 1))
-    effective_flow_cm3_per_hr = BASE_FLOW_CM3_PER_HR * complexity_factor
-    hours_per_cm3 = 1.0 / effective_flow_cm3_per_hr if effective_flow_cm3_per_hr > 0 else 0.0
+    density = MATERIAL_DENSITY_G_PER_CM3.get(material, MATERIAL_DENSITY_G_PER_CM3["PETG"])
+    weight_g = effective_volume_cm3 * density
+    machine_hours = weight_g / FDM_GRAMS_PER_HOUR
 
-    machine_hours = effective_volume_cm3 * hours_per_cm3
-    program_hours = 4.0
-    setup_hours = 8.0
+    program_hours = 4.0   # ตรงกับใบประเมินจริงทั้ง 2 ใบเป๊ะ (ไม่ต้องแก้)
+    setup_hours = 8.0     # ตรงกับใบประเมินจริงทั้ง 2 ใบเป๊ะ (ไม่ต้องแก้)
     total_time = machine_hours + program_hours + setup_hours
 
     return MachiningEstimate(
@@ -278,8 +266,11 @@ def estimate_3d_print_hours(
             "shell_volume_cm3": round(shell_volume_cm3, 2),
             "core_volume_cm3": round(core_volume_cm3, 2),
             "infill_pct": infill_pct,
+            "material": material,
+            "density_g_per_cm3": density,
             "effective_volume_cm3": round(effective_volume_cm3, 2),
-            "hours_per_cm3": hours_per_cm3,
+            "estimated_weight_g": round(weight_g, 1),
+            "hours_per_cm3": round(machine_hours / effective_volume_cm3, 5) if effective_volume_cm3 > 0 else 0.0,
             "machine_hours": round(machine_hours, 2),
             "roughing_hours": 0.0,
             "finishing_hours": round(machine_hours, 2),
@@ -289,5 +280,6 @@ def estimate_3d_print_hours(
             "parts_count": 1,
             "assembly_labor_hours": 0.0,
             "hourly_rate_baht": 50,
+            "calibration_note": "hours = weight_g / 25, weight_g exact-matched 2 real jobs (464hr@11.6kg, 496hr@12.4kg)",
         },
     )
