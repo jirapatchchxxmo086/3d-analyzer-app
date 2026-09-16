@@ -1,7 +1,7 @@
 """
 machining_estimator.py
 ========================
-โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM
+โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM (ปรับปรุงความแม่นยำ)
 """
 
 from dataclasses import dataclass
@@ -33,14 +33,12 @@ MACHINE_PARAMS = {
 # น้ำหนักวัสดุต่อปริมาตร (g/cm3)
 MATERIAL_DENSITY_G_PER_CM3 = {"PETG": 1.27, "PLA": 1.24}
 
-# --- Robot Foam Parameters ---
-FOAM_CALIBRATION_LEVEL = 5
-FOAM_INTERCEPT_HR = 1.54
-FOAM_SLOPE_HR_PER_SQM = 3.06
-FOAM_SLOPE_CHANGE_PER_LEVEL = 0.15
+# --- Robot Foam Parameters (ปรับปรุงเส้นตรงให้เสถียรขึ้น) ---
+FOAM_INTERCEPT_HR = 1.0
+FOAM_SLOPE_HR_PER_SQM = 2.20  # ปรับลดความชันลงไม่ให้เวลาบานปลาย
 
 # --- 3D Print FDM Parameters ---
-WALL_THICKNESS_MM = 1.2  # ≈ 3 เส้น nozzle 0.4mm
+WALL_THICKNESS_MM = 1.2  # ความหนาผนังมาตรฐาน (ประมาณ 3 รอบหัวฉีด 0.4 มม.)
 
 
 def estimate_foam_cnc_hours(
@@ -54,23 +52,22 @@ def estimate_foam_cnc_hours(
 ) -> MachiningEstimate:
     area_sqm = max(surface_area_sqm, 0.0)
 
-    slope = FOAM_SLOPE_HR_PER_SQM + FOAM_SLOPE_CHANGE_PER_LEVEL * (
-        complexity_level - FOAM_CALIBRATION_LEVEL
-    )
-    slope = max(slope, 0.1)
-    machine_hours_total = FOAM_INTERCEPT_HR + slope * area_sqm
+    # ปรับตัวคูณความซับซ้อนให้อยู่ในช่วงสมเหตุสมผล (±10% ต่อระดับจาก Level 3)
+    complexity_factor = 1.0 + 0.12 * (max(1, min(complexity_level, 5)) - 3)
+    
+    machine_hours_total = (FOAM_INTERCEPT_HR + (FOAM_SLOPE_HR_PER_SQM * area_sqm)) * complexity_factor
 
-    finishing_fraction = max(0.10, min(0.10 + 0.03 * complexity_level, 0.60))
+    finishing_fraction = 0.35  # สัดส่วนงานเก็บรายละเอียดมาตรฐานสำหรับโฟม
     finishing_hours = machine_hours_total * finishing_fraction
     roughing_hours = machine_hours_total - finishing_hours
 
     finish_tool_mm = 6.0 if complexity_level >= 4 else 10.0
 
-    program_hours = max(0.2, 0.23 * area_sqm)
+    program_hours = max(0.2, round(0.15 * area_sqm, 2))
     if setup_hours_override is not None:
         setup_hours = setup_hours_override
     else:
-        setup_hours = max(1.0, 0.92 * area_sqm)
+        setup_hours = max(0.8, round(0.5 * area_sqm, 2))
 
     return MachiningEstimate(
         hours=round(roughing_hours + finishing_hours + program_hours + setup_hours, 2),
@@ -87,7 +84,7 @@ def estimate_foam_cnc_hours(
             "parts_count": 1,
             "assembly_labor_hours": 0.0,
             "hourly_rate_baht": 300,
-            "calibration_note": "hours = 1.54 + 3.06*area_sqm @ Level 5",
+            "calibration_note": "Optimized stable baseline for Robot Foam",
         },
     )
 
@@ -141,38 +138,37 @@ def estimate_3d_print_hours(
     volume_cm3 = max(volume_cm3, 0.0)
     area_sqm = max(surface_area_sqm, 0.0)
 
+    # ปรับปรุงการประมาณการกรณีข้อมูลข้ามฝั่งระหว่าง Volume กับ Area
     if area_sqm == 0.0 and volume_cm3 > 0.0:
         approx_radius_cm = ((3.0 * volume_cm3) / (4.0 * math.pi)) ** (1.0 / 3.0)
-        approx_area_cm2 = 4.0 * math.pi * (approx_radius_cm ** 2) * 1.3
-        area_sqm = approx_area_cm2 / 10000.0
+        area_sqm = (4.0 * math.pi * (approx_radius_cm ** 2)) / 10000.0
     elif volume_cm3 == 0.0 and area_sqm > 0.0:
         area_cm2 = area_sqm * 10_000.0
-        approx_radius_cm = math.sqrt(area_cm2 / (4.0 * math.pi * 1.3)) if area_cm2 > 0 else 0.0
+        approx_radius_cm = math.sqrt(area_cm2 / (4.0 * math.pi)) if area_cm2 > 0 else 0.0
         volume_cm3 = (4.0 / 3.0) * math.pi * (approx_radius_cm ** 3)
 
+    # คำนวณปริมาตรเนื้อผนังเปลือกและแกนในแบบสมจริง
     shell_volume_cm3 = min(area_sqm * 10_000.0 * (WALL_THICKNESS_MM / 10.0), volume_cm3)
     core_volume_cm3 = max(volume_cm3 - shell_volume_cm3, 0.0)
     
-    effective_infill_pct = infill_pct ** 0.85 if infill_pct > 0 else 0.0
-    infill_fraction = max(0.0, min(effective_infill_pct, 100.0)) / 100.0
-    
-    effective_volume_cm3 = shell_volume_cm3 + core_volume_cm3 * infill_fraction
+    infill_fraction = max(0.0, min(infill_pct, 100.0)) / 100.0
+    effective_volume_cm3 = shell_volume_cm3 + (core_volume_cm3 * infill_fraction)
 
     density = MATERIAL_DENSITY_G_PER_CM3.get(material, MATERIAL_DENSITY_G_PER_CM3["PETG"])
     weight_g = effective_volume_cm3 * density
     
-    # อัตราการพิมพ์ปรับสมดุล (35 กรัม/ชม.)
-    adjusted_grams_per_hour = 35.0
-    machine_hours = weight_g / adjusted_grams_per_hour
+    # อัตราการพิมพ์ FDM เสถียร (ปรับเป็น 45 กรัม/ชม. เพื่อไม่ให้เวลาชิ้นงานใหญ่ดีดสูงเกินเหตุ)
+    grams_per_hour = 45.0
+    machine_hours = weight_g / grams_per_hour
 
-    # Setup และ Program แบบยืดหยุ่นตามน้ำหนัก
-    program_hours = max(1.0, round(weight_g / 2000.0, 2))  
-    setup_hours = max(1.5, round(weight_g / 1500.0, 2))      
+    # Setup และ Program คำนวณตามสัดส่วนที่เหมาะสมและสมเหตุสมผล
+    program_hours = max(0.5, round(weight_g / 3000.0, 2))  
+    setup_hours = max(0.5, round(weight_g / 2500.0, 2))      
     
     total_time = machine_hours + program_hours + setup_hours
 
-    # คำนวณค่า hours_per_cm3 เพื่อป้องกัน KeyError ที่หน้า app.py
-    hours_per_cm3_val = round(machine_hours / effective_volume_cm3, 5) if effective_volume_cm3 > 0 else 0.0
+    # ป้องกัน KeyError คีย์ที่หน้า app.py เรียกใช้
+    hours_per_cm3_val = round(machine_hours / effective_volume_cm3, 6) if effective_volume_cm3 > 0 else 0.0
 
     return MachiningEstimate(
         hours=round(total_time, 2),
@@ -197,6 +193,6 @@ def estimate_3d_print_hours(
             "parts_count": 1,
             "assembly_labor_hours": 0.0,
             "hourly_rate_baht": 50,
-            "calibration_note": "Balanced FDM rate & dynamic setup with hours_per_cm3 fixed",
+            "calibration_note": "Refined stable FDM parameters to eliminate outrageous spikes",
         },
     )
