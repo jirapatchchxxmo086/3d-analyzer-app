@@ -1297,15 +1297,15 @@ elif page == t["page_2_name"]:
             st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
             st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
 
-    # ==========================================
+# ==========================================
     # 📦 FOAM BLOCK ESTIMATOR (แสดงจำนวนก้อนโฟมที่แนะนำ)
     # ==========================================
     st.markdown("---")
     st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
 
     # ขนาดก้อนโฟมดิบมาตรฐาน (1.0 x 1.2 x 2.4 เมตร -> มิลลิเมตร)
-    DEFAULT_BLOCK_VOL_CM3 = (1000.0 * 1200.0 * 2400.0) / 1000.0  # 2,880,000 cm³
-    DEFAULT_SCRAP_PCT = 15.0  # เผื่อ Scrap Factor 15%
+    DEFAULT_BLOCK_VOL_CM3 = (1000.0 * 1200.0 * 2400.0) / 1000.0
+    DEFAULT_SCRAP_PCT = 15.0
 
     # คำนวณปริมาตรรวมและจำนวนก้อน (ทศนิยม 1 ตำแหน่ง)
     total_bbox_vol_cm3 = bbox_volume_cm3 * production_qty
@@ -1313,9 +1313,10 @@ elif page == t["page_2_name"]:
     recommended_blocks_float = net_blocks * (1.0 + (DEFAULT_SCRAP_PCT / 100.0))
 
     # แสดงผล Card คำนวณ
- st.info(f"💡 **คำแนะนำการสั่งซื้อ:** ชิ้นงานนี้ใช้โฟมประมาณ **{recommended_blocks_float:.1f} ก้อน** (คำนวณจากขนาดก้อนมาตรฐาน 1.0x1.2x2.4 m และรวม Scrap Factor {DEFAULT_SCRAP_PCT:.0f}% แล้ว)")
+    st.info(f"💡 **คำแนะนำการสั่งซื้อ:** ชิ้นงานนี้ใช้โฟมประมาณ **{recommended_blocks_float:.1f} ก้อน** (คำนวณจากขนาดก้อนมาตรฐาน 1.0x1.2x2.4 m และรวม Scrap Factor {DEFAULT_SCRAP_PCT:.0f}% แล้ว)")
+
     # ==========================================
-    # 📦 ระบบเลือกวัสดุจาก Master Data
+    # 📦 SECTION 4: ระบบเลือกวัสดุจาก Master Data
     # ==========================================
     st.markdown("---")
     st.markdown(f"##### {t['use_mat']}")
@@ -1325,10 +1326,6 @@ elif page == t["page_2_name"]:
 
         with m_col1:
             selected_cat = st.selectbox(t["select_cat"], list(MATERIAL_MASTER_DB.keys()))
-
-        with m_col2:
-            materials_in_cat = list(MATERIAL_MASTER_DB[selected_cat].keys())
-            selected_mat_item = st.selectbox(t["select_item"], materials_in_cat)
 
         unit_price = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
         unit_cost = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
