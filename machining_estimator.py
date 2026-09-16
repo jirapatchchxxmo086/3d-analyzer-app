@@ -72,9 +72,9 @@ def estimate_foam_cnc_hours(
     else:
         setup_hours = max(0.8, round(0.5 * area_sqm, 2))
 
-    # --- เพิ่มระบบคำนวณแนะนำจำนวนก้อนโฟม (Recommended Blocks) ---
-    # ขนาดก้อนโฟมมาตรฐาน (มม.): 600 x 1220 x 2440
-    standard_block_volume_cm3 = (600.0 * 1220.0 * 2440.0) / 1000.0333  # ~1,785,120 cm3
+    # --- ระบบคำนวณแนะนำจำนวนก้อนโฟม (Recommended Blocks) ---
+    # ขนาดก้อนโฟมมาตรฐาน (มม.): 1000 x 1200 x 2400 -> ปริมาตร 2,880,000 cm3
+    standard_block_volume_cm3 = (1000.0 * 1200.0 * 2400.0) / 1000.0
     
     if width_mm > 0 and length_mm > 0 and height_mm > 0:
         block_calc = estimate_foam_blocks_needed(
@@ -82,10 +82,10 @@ def estimate_foam_cnc_hours(
         )
         recommended_blocks = block_calc["blocks_needed"]
     else:
-        # ถ้าไม่มีกว้างยาวมาให้ ใช้พื้นที่ผิวและสัดส่วนประเมินคร่าวๆ เป็นตัวเลขแนะนำ
-        estimated_vol_cm3 = area_sqm * 10000.0 * (height_mm / 10.0) * 0.3  # สมมติเนื้อโฟม 30% ของ Bounding Box
-        raw_blocks = estimated_vol_cm3 / standard_block_volume_cm3 if standard_block_volume_cm3 > 0 else 1.0
-        recommended_blocks = max(1, math.ceil(raw_blocks * 1.15))
+        # กรณีไม่มีมิติกว้างยาว ใช้ Bounding Envelope ประเมินจากพื้นที่ผิวและสัดส่วน
+        estimated_envelope_cm3 = area_sqm * 10000.0 * (height_mm / 10.0) * 0.8
+        raw_blocks = estimated_envelope_cm3 / standard_block_volume_cm3 if standard_block_volume_cm3 > 0 else 1.0
+        recommended_blocks = round(max(0.5, raw_blocks * 1.35), 1)
 
     return MachiningEstimate(
         hours=round(roughing_hours + finishing_hours + program_hours + setup_hours, 2),
@@ -98,12 +98,12 @@ def estimate_foam_cnc_hours(
             "finish_tool_mm_used": finish_tool_mm,
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
-            "recommended_blocks": recommended_blocks,  # ค่าแนะนำจำนวนก้อนโฟมสำหรับนำไปกรอก
+            "recommended_blocks": recommended_blocks,  # ค่าแนะนำจำนวนก้อนโฟม (float 1 ตำแหน่ง)
             "billed_total_hours_excl_setup": round(roughing_hours + finishing_hours + program_hours, 2),
             "parts_count": 1,
             "assembly_labor_hours": 0.0,
             "hourly_rate_baht": 300,
-            "calibration_note": "Optimized stable baseline with recommended blocks feature",
+            "calibration_note": "Optimized stable baseline with envelope-based recommended blocks",
         },
     )
 
@@ -112,37 +112,36 @@ def estimate_foam_blocks_needed(
     width_mm: float,
     length_mm: float,
     height_mm: float,
-    block_w_mm: float = 600.0,
-    block_l_mm: float = 1220.0,
-    block_h_mm: float = 2440.0,
+    block_w_mm: float = 1000.0,
+    block_l_mm: float = 1200.0,
+    block_h_mm: float = 2400.0,
     hollow_shell: bool = True,
     wall_thickness_mm: float = 75.0,
-    waste_factor: float = 1.15,
+    waste_factor: float = 1.35,
 ) -> Dict[str, Any]:
-    bbox_volume_mm3 = width_mm * length_mm * height_mm
+    """
+    คำนวณจำนวนก้อนโฟมมาตรฐานอ้างอิงตาม Bounding Box Envelope 
+    ตรงตามใบประเมินราคาจริง (Estimate Sheet)
+    """
+    # 1. คิดปริมาตรกล่องครอบสี่เหลี่ยม (Bounding Box Envelope) มม.³
+    bbox_envelope_mm3 = width_mm * length_mm * height_mm
 
-    if hollow_shell:
-        inner_w = max(width_mm - 2 * wall_thickness_mm, 0.0)
-        inner_l = max(length_mm - 2 * wall_thickness_mm, 0.0)
-        inner_h = max(height_mm - 2 * wall_thickness_mm, 0.0)
-        inner_volume_mm3 = inner_w * inner_l * inner_h
-        material_volume_mm3 = max(bbox_volume_mm3 - inner_volume_mm3, 0.0)
-    else:
-        material_volume_mm3 = bbox_volume_mm3
-
+    # 2. ปริมาตรโฟมมาตรฐาน 1 ก้อน (1.0 x 1.2 x 2.4 m = 2,880,000,000 mm³)
     block_volume_mm3 = block_w_mm * block_l_mm * block_h_mm
-    blocks_needed_raw = material_volume_mm3 / block_volume_mm3 if block_volume_mm3 > 0 else 0.0
-    blocks_needed = math.ceil(blocks_needed_raw * waste_factor)
+
+    # 3. คำนวณจำนวนก้อนสุทธิตาม Bounding Envelope ร่วมกับ Waste/Scrap Factor งานสลัก 3D
+    blocks_needed_raw = (bbox_envelope_mm3 / block_volume_mm3) * waste_factor if block_volume_mm3 > 0 else 0.0
+    recommended_blocks = round(max(0.5, blocks_needed_raw), 1)
 
     return {
-        "material_volume_cm3": round(material_volume_mm3 / 1000.0, 1),
+        "material_volume_cm3": round(bbox_envelope_mm3 / 1000.0, 1),
         "block_volume_cm3": round(block_volume_mm3 / 1000.0, 1),
         "blocks_needed_raw": round(blocks_needed_raw, 2),
         "waste_factor": waste_factor,
-        "blocks_needed": max(1, blocks_needed),
+        "blocks_needed": recommended_blocks,
         "hollow_shell": hollow_shell,
         "wall_thickness_mm": wall_thickness_mm,
-        "note": "Volumetric estimate with standard foam blocks",
+        "note": "Envelope-based estimate matching official Estimate Sheets",
     }
 
 
