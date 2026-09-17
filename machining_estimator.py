@@ -137,7 +137,8 @@ def estimate_foam_blocks_needed(
     - hollow_shell=False: ใช้ปริมาตร bounding box เต็ม (สำหรับกรณีต้องการเผื่อตันทั้งก้อน)
 
     ปริมาตรเนื้อโฟมที่ได้ หารด้วยปริมาตรก้อนมาตรฐาน แล้วคูณ waste_factor (เผื่อเศษเหลือจาก
-    การตัด/ต่อกาว/วางแนว) ก่อนปัดเศษขึ้นเป็นจำนวนก้อนเต็ม
+    การตัด/ต่อกาว/วางแนว) — ผลลัพธ์เป็นตัวเลขทศนิยม 1 ตำแหน่ง (เช่น 1.8 ก้อน) ไม่ปัดขึ้นเป็น
+    จำนวนเต็ม เพราะใช้เป็นตัวเลขแนะนำเทียบเคียง ไม่ใช่จำนวนสั่งซื้อที่ต้องปัดขึ้นเสมอไป
     """
     bbox_volume_mm3 = width_mm * length_mm * height_mm
 
@@ -156,7 +157,7 @@ def estimate_foam_blocks_needed(
         material_volume_mm3 / block_volume_mm3 if block_volume_mm3 > 0 else 0.0
     )
 
-    blocks_needed = math.ceil(blocks_needed_raw * waste_factor) if blocks_needed_raw > 0 else 0
+    blocks_needed = round(blocks_needed_raw * waste_factor, 1)
 
     return {
         "material_volume_cm3": round(material_volume_mm3 / 1000.0, 1),
@@ -167,7 +168,7 @@ def estimate_foam_blocks_needed(
         "hollow_shell": hollow_shell,
         "wall_thickness_mm": wall_thickness_mm,
         "block_dims_mm": (block_w_mm, block_l_mm, block_h_mm),
-        "note": "Volumetric estimate, hollow-shell aware",
+        "note": "Volumetric estimate, hollow-shell aware, rounded to 1 decimal",
     }
 
 
