@@ -3,18 +3,6 @@ machining_estimator.py
 ========================
 โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM
 พร้อมฟังก์ชันแนะนำจำนวนก้อนโฟมสำหรับผลิต (estimate_foam_blocks_needed)
-
-หมายเหตุการแก้ไข (สำคัญ):
-- estimate_foam_blocks_needed() เดิมคำนวณแบบ "หารปริมาตร" (เนื้อโฟม ÷ ปริมาตรก้อน) ซึ่งผิด
-  หลักการทางกายภาพของการกัด CNC ก้อนโฟมเป็นของแข็งแบ่งเสี้ยวไม่ได้ — การกัดคือกัดเนื้อออกจาก
-  ก้อนตันก้อนหนึ่งเสมอ ไม่ใช่ประกอบเศษจากหลายที่มารวมกัน ดังนั้นแม้ชิ้นงานจะกลวงแค่ไหน ถ้าขนาด
-  ภายนอกใหญ่กว่าก้อนเดียวก็ต้องใช้มากกว่า 1 ก้อนอยู่ดี วิธีหารปริมาตรเคยให้ตัวเลขต่ำผิดปกติ
-  (เช่น 0.5 ก้อน สำหรับโมเดลสูงเกือบ 2 เมตร ซึ่งเป็นไปไม่ได้จริง) เวอร์ชันนี้เปลี่ยนเป็นวิธี
-  "container-fit": ลองหมุนทิศทางโมเดลเทียบกับก้อน แล้วนับจำนวนก้อนจริงที่ต้องเรียงในแต่ละแกน
-- estimate_foam_cnc_hours() ไม่คำนวณจำนวนก้อนโฟมซ้อนอยู่ข้างในอีกต่อไป (ก่อนหน้านี้มี
-  logic คำนวณก้อนโฟมซ้ำอยู่ทั้งในฟังก์ชันนี้และใน estimate_foam_blocks_needed() ซึ่งให้
-  ตัวเลขไม่ตรงกัน) — ให้ฟังก์ชันนี้โฟกัสแค่ชั่วโมงเครื่องจักร ส่วนจำนวนก้อนโฟมเรียก
-  estimate_foam_blocks_needed() แยกต่างหากที่เดียว
 """
 
 from dataclasses import dataclass
@@ -55,8 +43,6 @@ FOAM_SLOPE_HR_PER_SQM = 2.20
 WALL_THICKNESS_MM = 1.2  # ความหนาผนังมาตรฐาน (ประมาณ 3 รอบหัวฉีด 0.4 มม.)
 
 # --- Foam Block defaults ---
-# ขนาดแผ่นโฟมมาตรฐานทั่วไปที่ใช้ในโรงงาน (มม.) — ปรับได้ผ่านพารามิเตอร์ของฟังก์ชัน
-# หรือผ่าน UI ถ้ามีการตั้งค่าใน Sheet ให้ใช้ค่าจาก Sheet แทน
 DEFAULT_FOAM_BLOCK_W_MM = 600.0
 DEFAULT_FOAM_BLOCK_L_MM = 1220.0
 DEFAULT_FOAM_BLOCK_H_MM = 2440.0
@@ -77,12 +63,10 @@ def estimate_foam_cnc_hours(
     machine_name: str = "Robot_Foam",
 ) -> MachiningEstimate:
     """
-    ประเมินชั่วโมงกัด Robot CNC (โฟม) เท่านั้น — ไม่คำนวณจำนวนก้อนโฟมในฟังก์ชันนี้
-    (ใช้ estimate_foam_blocks_needed() แยกต่างหากสำหรับจำนวนก้อน)
+    ประเมินชั่วโมงกัด Robot CNC (โฟม) เท่านั้น
     """
     area_sqm = max(surface_area_sqm, 0.0)
 
-    # ปรับตัวคูณความซับซ้อนให้อยู่ในช่วงสมเหตุสมผล (level 1-5)
     complexity_factor = 1.0 + 0.12 * (clamp(complexity_level, 1, 5) - 3)
 
     machine_hours_total = (FOAM_INTERCEPT_HR + (FOAM_SLOPE_HR_PER_SQM * area_sqm)) * complexity_factor
@@ -129,23 +113,10 @@ def estimate_foam_blocks_needed(
     waste_factor: float = DEFAULT_FOAM_WASTE_FACTOR,
 ) -> Dict[str, Any]:
     """
-    คำนวณจำนวนก้อนโฟมมาตรฐานที่ต้องใช้ ด้วยวิธี "container-fit" (เช็คว่าโมเดลใส่ในก้อนได้
-    กี่ก้อนจริงๆ ทางกายภาพ) แทนการหารปริมาตร
-
-    เหตุผลที่เปลี่ยนจากวิธีหารปริมาตร (เวอร์ชันก่อนหน้า):
-    การกัด CNC คือกัดเนื้อออกจากก้อนตันก้อนหนึ่งเสมอ ไม่ใช่ประกอบเศษวัสดุจากหลายที่มารวมกัน —
-    ดังนั้นแม้ชิ้นงานจะกลวงด้านในแค่ไหน ถ้าขนาดภายนอก (bounding box) ยังใหญ่กว่าก้อนเดียว
-    ก็ต้องใช้มากกว่า 1 ก้อนอยู่ดี และถ้าใส่ในก้อนเดียวได้พอดี ก็ใช้แค่ 1 ก้อน ไม่ว่าเนื้อในจะ
-    กลวงแค่ไหน วิธีหารปริมาตรแบบเดิมให้ตัวเลขต่ำกว่าความเป็นจริงมากสำหรับชิ้นงานทรงเรียว/สูง
-    (เช่นได้ 0.5 ก้อน ทั้งที่โมเดลสูงเกือบ 2 เมตร ซึ่งเป็นไปไม่ได้ทางกายภาพ)
-
-    วิธีคำนวณ: ลองหมุนทิศทางโมเดล (6 การจัดวางที่เป็นไปได้) เทียบกับแกนของก้อนโฟม แล้วหา
-    การจัดวางที่ใช้จำนวนก้อนน้อยที่สุด ในแต่ละแกนคำนวณ ceil(ขนาดโมเดล / ขนาดก้อน) แล้วคูณ
-    ทั้ง 3 แกนเข้าด้วยกัน จากนั้นคูณด้วย waste_factor เป็นส่วนเผื่อสำหรับเศษเหลือจากการตัด/
-    จัดวางไม่พอดี ผลลัพธ์ปัดเป็นทศนิยม 1 ตำแหน่ง
+    คำนวณจำนวนก้อนโฟมมาตรฐานที่ต้องใช้ด้วยวิธี container-fit
     """
-    piece_dims = (max(width_mm, 0.0), max(length_mm, 0.0), max(height_mm, 0.0))
-    block_dims = (block_w_mm, block_l_mm, block_h_mm)
+    piece_dims = (max(float(width_mm), 0.0), max(float(length_mm), 0.0), max(float(height_mm), 0.0))
+    block_dims = (float(block_w_mm), float(block_l_mm), float(block_h_mm))
 
     best_units_product = None
     best_units_per_axis = (0, 0, 0)
@@ -174,7 +145,7 @@ def estimate_foam_blocks_needed(
         "blocks_needed": blocks_needed,
         "units_per_axis": best_units_per_axis,
         "block_dims_mm": block_dims,
-        "note": "Container-fit estimate (best-orientation bin count), not a volume ratio",
+        "note": "Container-fit estimate (best-orientation bin count)",
     }
 
 
