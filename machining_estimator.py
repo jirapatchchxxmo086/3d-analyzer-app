@@ -5,12 +5,12 @@ machining_estimator.py
 พร้อมฟังก์ชันแนะนำจำนวนก้อนโฟมสำหรับผลิต (estimate_foam_blocks_needed)
 
 หมายเหตุการแก้ไข (สำคัญ):
-- estimate_foam_blocks_needed() ก่อนหน้านี้ถูกปรับสูตรให้ได้คำตอบ "1.8 ก้อน" สำหรับ
-  โมเดลตัวอย่างเดียว (hardcode sculpture_3d_allowance = 1.80, เปลี่ยนขนาดก้อนเป็น
-  1000x1200x2400 โดยไม่มีเหตุผล, และไม่ใช้ hollow_shell/wall_thickness_mm ที่รับเข้ามาเลย)
-  ทำให้พอเจอโมเดลขนาด/รูปทรงอื่นตัวเลขจะผิด — เวอร์ชันนี้คืนสูตรที่ถูกต้อง:
-  ปริมาตรเนื้อโฟมจริง (bbox ลบส่วนกลวงถ้า hollow_shell=True) หารด้วยปริมาตรก้อนมาตรฐาน
-  แล้วเผื่อเศษ/ตัดต่อด้วย waste_factor ที่ปรับได้ ไม่ใช่ตัวเลขที่ยัดมาให้ตรงคำตอบเดียว
+- estimate_foam_blocks_needed() เดิมคำนวณแบบ "หารปริมาตร" (เนื้อโฟม ÷ ปริมาตรก้อน) ซึ่งผิด
+  หลักการทางกายภาพของการกัด CNC ก้อนโฟมเป็นของแข็งแบ่งเสี้ยวไม่ได้ — การกัดคือกัดเนื้อออกจาก
+  ก้อนตันก้อนหนึ่งเสมอ ไม่ใช่ประกอบเศษจากหลายที่มารวมกัน ดังนั้นแม้ชิ้นงานจะกลวงแค่ไหน ถ้าขนาด
+  ภายนอกใหญ่กว่าก้อนเดียวก็ต้องใช้มากกว่า 1 ก้อนอยู่ดี วิธีหารปริมาตรเคยให้ตัวเลขต่ำผิดปกติ
+  (เช่น 0.5 ก้อน สำหรับโมเดลสูงเกือบ 2 เมตร ซึ่งเป็นไปไม่ได้จริง) เวอร์ชันนี้เปลี่ยนเป็นวิธี
+  "container-fit": ลองหมุนทิศทางโมเดลเทียบกับก้อน แล้วนับจำนวนก้อนจริงที่ต้องเรียงในแต่ละแกน
 - estimate_foam_cnc_hours() ไม่คำนวณจำนวนก้อนโฟมซ้อนอยู่ข้างในอีกต่อไป (ก่อนหน้านี้มี
   logic คำนวณก้อนโฟมซ้ำอยู่ทั้งในฟังก์ชันนี้และใน estimate_foam_blocks_needed() ซึ่งให้
   ตัวเลขไม่ตรงกัน) — ให้ฟังก์ชันนี้โฟกัสแค่ชั่วโมงเครื่องจักร ส่วนจำนวนก้อนโฟมเรียก
@@ -20,6 +20,7 @@ machining_estimator.py
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 import math
+import itertools
 
 
 @dataclass
@@ -125,50 +126,55 @@ def estimate_foam_blocks_needed(
     block_w_mm: float = DEFAULT_FOAM_BLOCK_W_MM,
     block_l_mm: float = DEFAULT_FOAM_BLOCK_L_MM,
     block_h_mm: float = DEFAULT_FOAM_BLOCK_H_MM,
-    hollow_shell: bool = True,
-    wall_thickness_mm: float = 75.0,
     waste_factor: float = DEFAULT_FOAM_WASTE_FACTOR,
 ) -> Dict[str, Any]:
     """
-    คำนวณจำนวนก้อนโฟมมาตรฐานที่ต้องใช้ จากปริมาตรเนื้อโฟมจริงที่ต้องกัด:
+    คำนวณจำนวนก้อนโฟมมาตรฐานที่ต้องใช้ ด้วยวิธี "container-fit" (เช็คว่าโมเดลใส่ในก้อนได้
+    กี่ก้อนจริงๆ ทางกายภาพ) แทนการหารปริมาตร
 
-    - hollow_shell=True (ค่าเริ่มต้น): ใช้ bounding box ลบด้วยปริมาตรภายในที่เว้นไว้
-      (หนา wall_thickness_mm รอบด้าน) — ถ้าชิ้นงานกลวงด้านใน ใช้เนื้อโฟมน้อยกว่าตัน
-    - hollow_shell=False: ใช้ปริมาตร bounding box เต็ม (สำหรับกรณีต้องการเผื่อตันทั้งก้อน)
+    เหตุผลที่เปลี่ยนจากวิธีหารปริมาตร (เวอร์ชันก่อนหน้า):
+    การกัด CNC คือกัดเนื้อออกจากก้อนตันก้อนหนึ่งเสมอ ไม่ใช่ประกอบเศษวัสดุจากหลายที่มารวมกัน —
+    ดังนั้นแม้ชิ้นงานจะกลวงด้านในแค่ไหน ถ้าขนาดภายนอก (bounding box) ยังใหญ่กว่าก้อนเดียว
+    ก็ต้องใช้มากกว่า 1 ก้อนอยู่ดี และถ้าใส่ในก้อนเดียวได้พอดี ก็ใช้แค่ 1 ก้อน ไม่ว่าเนื้อในจะ
+    กลวงแค่ไหน วิธีหารปริมาตรแบบเดิมให้ตัวเลขต่ำกว่าความเป็นจริงมากสำหรับชิ้นงานทรงเรียว/สูง
+    (เช่นได้ 0.5 ก้อน ทั้งที่โมเดลสูงเกือบ 2 เมตร ซึ่งเป็นไปไม่ได้ทางกายภาพ)
 
-    ปริมาตรเนื้อโฟมที่ได้ หารด้วยปริมาตรก้อนมาตรฐาน แล้วคูณ waste_factor (เผื่อเศษเหลือจาก
-    การตัด/ต่อกาว/วางแนว) — ผลลัพธ์เป็นตัวเลขทศนิยม 1 ตำแหน่ง (เช่น 1.8 ก้อน) ไม่ปัดขึ้นเป็น
-    จำนวนเต็ม เพราะใช้เป็นตัวเลขแนะนำเทียบเคียง ไม่ใช่จำนวนสั่งซื้อที่ต้องปัดขึ้นเสมอไป
+    วิธีคำนวณ: ลองหมุนทิศทางโมเดล (6 การจัดวางที่เป็นไปได้) เทียบกับแกนของก้อนโฟม แล้วหา
+    การจัดวางที่ใช้จำนวนก้อนน้อยที่สุด ในแต่ละแกนคำนวณ ceil(ขนาดโมเดล / ขนาดก้อน) แล้วคูณ
+    ทั้ง 3 แกนเข้าด้วยกัน จากนั้นคูณด้วย waste_factor เป็นส่วนเผื่อสำหรับเศษเหลือจากการตัด/
+    จัดวางไม่พอดี ผลลัพธ์ปัดเป็นทศนิยม 1 ตำแหน่ง
     """
-    bbox_volume_mm3 = width_mm * length_mm * height_mm
+    piece_dims = (max(width_mm, 0.0), max(length_mm, 0.0), max(height_mm, 0.0))
+    block_dims = (block_w_mm, block_l_mm, block_h_mm)
 
-    if hollow_shell:
-        inner_w = max(width_mm - 2 * wall_thickness_mm, 0.0)
-        inner_l = max(length_mm - 2 * wall_thickness_mm, 0.0)
-        inner_h = max(height_mm - 2 * wall_thickness_mm, 0.0)
-        inner_volume_mm3 = inner_w * inner_l * inner_h
-        material_volume_mm3 = max(bbox_volume_mm3 - inner_volume_mm3, 0.0)
-    else:
-        material_volume_mm3 = bbox_volume_mm3
+    best_units_product = None
+    best_units_per_axis = (0, 0, 0)
 
-    block_volume_mm3 = block_w_mm * block_l_mm * block_h_mm
+    for perm in itertools.permutations(piece_dims):
+        units_per_axis = []
+        feasible = True
+        for piece_len, block_len in zip(perm, block_dims):
+            if block_len <= 0:
+                feasible = False
+                break
+            units_per_axis.append(math.ceil(piece_len / block_len) if piece_len > 0 else 0)
+        if not feasible:
+            continue
+        units_product = units_per_axis[0] * units_per_axis[1] * units_per_axis[2]
+        if best_units_product is None or units_product < best_units_product:
+            best_units_product = units_product
+            best_units_per_axis = tuple(units_per_axis)
 
-    blocks_needed_raw = (
-        material_volume_mm3 / block_volume_mm3 if block_volume_mm3 > 0 else 0.0
-    )
-
+    blocks_needed_raw = best_units_product if best_units_product is not None else 0
     blocks_needed = round(blocks_needed_raw * waste_factor, 1)
 
     return {
-        "material_volume_cm3": round(material_volume_mm3 / 1000.0, 1),
-        "block_volume_cm3": round(block_volume_mm3 / 1000.0, 1),
-        "blocks_needed_raw": round(blocks_needed_raw, 2),
+        "blocks_needed_raw": blocks_needed_raw,
         "waste_factor": waste_factor,
         "blocks_needed": blocks_needed,
-        "hollow_shell": hollow_shell,
-        "wall_thickness_mm": wall_thickness_mm,
-        "block_dims_mm": (block_w_mm, block_l_mm, block_h_mm),
-        "note": "Volumetric estimate, hollow-shell aware, rounded to 1 decimal",
+        "units_per_axis": best_units_per_axis,
+        "block_dims_mm": block_dims,
+        "note": "Container-fit estimate (best-orientation bin count), not a volume ratio",
     }
 
 
