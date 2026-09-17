@@ -1392,24 +1392,13 @@ elif page == t["page_2_name"]:
                 "whole-model bounding box instead (may slightly overestimate for models with "
                 "widely separated parts)."
             )
-        # FIX: ข้อความเดิม "0.5 ก้อน (จำนวน 1 ชิ้น)" ทำให้สับสนว่า "ก้อน" กับ "ชิ้น" เป็น
-        # หน่วยเดียวกันหรือเปล่า — ตอนนี้แยกความหมายชัดเจน: "ชิ้น" = จำนวนโปรดักต์ที่จะผลิต,
-        # "ก้อน" = ปริมาณวัตถุดิบโฟมที่ต้องใช้ ถ้าผลิตมากกว่า 1 ชิ้น จะโชว์ทั้งยอดรวมและ
-        # ค่าเฉลี่ยต่อชิ้นให้เห็นที่มาของตัวเลขด้วย
-        if production_qty > 1:
-            st.info(
-                f"คำแนะนำ: ผลิตชิ้นงาน {production_qty} ชิ้น ต้องใช้โฟมรวมประมาณ "
-                f"{total_blocks:.1f} ก้อน (เฉลี่ย {per_piece_blocks:.1f} ก้อนต่อชิ้น)"
-                if lang == "TH" else
-                f"Recommendation: producing {production_qty} pcs needs approximately "
-                f"{total_blocks:.1f} block(s) of foam in total (avg. {per_piece_blocks:.1f} block(s) per piece)"
-            )
-        else:
-            st.info(
-                f"คำแนะนำ: ผลิตชิ้นงาน 1 ชิ้น ต้องใช้โฟมประมาณ {total_blocks:.1f} ก้อน"
-                if lang == "TH" else
-                f"Recommendation: producing 1 pc needs approximately {total_blocks:.1f} block(s) of foam"
-            )
+        # ตามที่ขอ: โชว์แค่ตัวเลขเดียว "ปริมาณวัตถุดิบโฟมที่ต้องใช้ X ชิ้น" ไม่ต้องแยก
+        # ยอดรวม/เฉลี่ยต่อชิ้นให้ซับซ้อน — total_blocks คือยอดรวมทั้ง production_qty แล้ว
+        st.info(
+            f"ปริมาณวัตถุดิบโฟมที่ต้องใช้: {total_blocks:.1f} ชิ้น"
+            if lang == "TH" else
+            f"Foam material required: {total_blocks:.1f} piece(s)"
+        )
     else:
         st.info(
             "อัปโหลดไฟล์ 3D ที่หน้าแรกก่อน เพื่อคำนวณจำนวนก้อนโฟม"
