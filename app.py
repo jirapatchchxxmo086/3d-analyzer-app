@@ -1366,8 +1366,7 @@ elif page == t["page_2_name"]:
             calc = estimate_foam_blocks_needed(
                 width_mm=float(ext[0]), length_mm=float(ext[1]), height_mm=float(ext[2]),
                 block_w_mm=DEFAULT_FOAM_BLOCK_W_MM, block_l_mm=DEFAULT_FOAM_BLOCK_L_MM,
-                block_h_mm=DEFAULT_FOAM_BLOCK_H_MM,
-                wall_thickness_mm=current_wall_thick, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
+                block_h_mm=DEFAULT_FOAM_BLOCK_H_MM, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
             )
             per_part_blocks.append(calc["blocks_needed"])
         per_piece_blocks = round(sum(per_part_blocks), 1)
@@ -1376,8 +1375,7 @@ elif page == t["page_2_name"]:
         calc = estimate_foam_blocks_needed(
             width_mm=x_mm, length_mm=y_mm, height_mm=z_mm,
             block_w_mm=DEFAULT_FOAM_BLOCK_W_MM, block_l_mm=DEFAULT_FOAM_BLOCK_L_MM,
-            block_h_mm=DEFAULT_FOAM_BLOCK_H_MM,
-            wall_thickness_mm=current_wall_thick, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
+            block_h_mm=DEFAULT_FOAM_BLOCK_H_MM, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
         )
         per_piece_blocks = calc["blocks_needed"]
         total_blocks = round(per_piece_blocks * production_qty, 1)
