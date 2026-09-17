@@ -1357,6 +1357,7 @@ elif page == t["page_2_name"]:
             submesh_split_failed = True
 
     total_blocks = 0.0
+    per_piece_blocks = 0.0
 
     if submesh_count > 1 and len(submeshes_for_blocks) > 1:
         per_part_blocks = []
@@ -1369,7 +1370,8 @@ elif page == t["page_2_name"]:
                 wall_thickness_mm=current_wall_thick, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
             )
             per_part_blocks.append(calc["blocks_needed"])
-        total_blocks = round(sum(per_part_blocks) * production_qty, 1)
+        per_piece_blocks = round(sum(per_part_blocks), 1)
+        total_blocks = round(per_piece_blocks * production_qty, 1)
     elif x_mm > 0 and y_mm > 0 and z_mm > 0:
         calc = estimate_foam_blocks_needed(
             width_mm=x_mm, length_mm=y_mm, height_mm=z_mm,
@@ -1377,7 +1379,8 @@ elif page == t["page_2_name"]:
             block_h_mm=DEFAULT_FOAM_BLOCK_H_MM,
             wall_thickness_mm=current_wall_thick, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
         )
-        total_blocks = round(calc["blocks_needed"] * production_qty, 1)
+        per_piece_blocks = calc["blocks_needed"]
+        total_blocks = round(per_piece_blocks * production_qty, 1)
 
     if x_mm > 0 and y_mm > 0 and z_mm > 0:
         if submesh_split_failed:
@@ -1389,11 +1392,24 @@ elif page == t["page_2_name"]:
                 "whole-model bounding box instead (may slightly overestimate for models with "
                 "widely separated parts)."
             )
-        st.info(
-            f"คำแนะนำ: ชิ้นงานนี้ใช้โฟมประมาณ {total_blocks:.1f} ก้อน (จำนวน {production_qty} ชิ้น)"
-            if lang == "TH" else
-            f"Recommendation: this job needs approximately {total_blocks:.1f} block(s) of foam (for {production_qty} pcs)"
-        )
+        # FIX: ข้อความเดิม "0.5 ก้อน (จำนวน 1 ชิ้น)" ทำให้สับสนว่า "ก้อน" กับ "ชิ้น" เป็น
+        # หน่วยเดียวกันหรือเปล่า — ตอนนี้แยกความหมายชัดเจน: "ชิ้น" = จำนวนโปรดักต์ที่จะผลิต,
+        # "ก้อน" = ปริมาณวัตถุดิบโฟมที่ต้องใช้ ถ้าผลิตมากกว่า 1 ชิ้น จะโชว์ทั้งยอดรวมและ
+        # ค่าเฉลี่ยต่อชิ้นให้เห็นที่มาของตัวเลขด้วย
+        if production_qty > 1:
+            st.info(
+                f"คำแนะนำ: ผลิตชิ้นงาน {production_qty} ชิ้น ต้องใช้โฟมรวมประมาณ "
+                f"{total_blocks:.1f} ก้อน (เฉลี่ย {per_piece_blocks:.1f} ก้อนต่อชิ้น)"
+                if lang == "TH" else
+                f"Recommendation: producing {production_qty} pcs needs approximately "
+                f"{total_blocks:.1f} block(s) of foam in total (avg. {per_piece_blocks:.1f} block(s) per piece)"
+            )
+        else:
+            st.info(
+                f"คำแนะนำ: ผลิตชิ้นงาน 1 ชิ้น ต้องใช้โฟมประมาณ {total_blocks:.1f} ก้อน"
+                if lang == "TH" else
+                f"Recommendation: producing 1 pc needs approximately {total_blocks:.1f} block(s) of foam"
+            )
     else:
         st.info(
             "อัปโหลดไฟล์ 3D ที่หน้าแรกก่อน เพื่อคำนวณจำนวนก้อนโฟม"
