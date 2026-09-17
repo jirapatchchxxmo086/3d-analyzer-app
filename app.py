@@ -1390,11 +1390,9 @@ elif page == t["page_2_name"]:
                 "widely separated parts)."
             )
         st.info(
-            f"💡 **คำแนะนำ:** ชิ้นงานนี้ใช้โฟมประมาณ **{total_blocks:.1f} ก้อน** "
-            f"(จำนวน {production_qty} ชิ้น)"
+            f"คำแนะนำ: ชิ้นงานนี้ใช้โฟมประมาณ {total_blocks:.1f} ก้อน (จำนวน {production_qty} ชิ้น)"
             if lang == "TH" else
-            f"💡 **Recommended:** this job needs approximately **{total_blocks:.1f} block(s)** "
-            f"of foam (for {production_qty} pcs)"
+            f"Recommendation: this job needs approximately {total_blocks:.1f} block(s) of foam (for {production_qty} pcs)"
         )
     else:
         st.info(
