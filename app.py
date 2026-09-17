@@ -1216,12 +1216,30 @@ elif page == t["page_2_name"]:
 
     if st.session_state["selected_operations"]:
         st.markdown(f"###### {t['op_selected_list']}")
-        ops_df = pd.DataFrame(st.session_state["selected_operations"])
-        display_ops_df = ops_df[["machine", "unit", "rate", "qty", "total"]].copy()
-        display_ops_df.columns = [
-            t["op_col_machine"], t["op_col_unit"], t["op_col_rate"], t["op_col_qty"], t["op_col_total"]
-        ]
-        st.dataframe(display_ops_df, use_container_width=True)
+
+        # FIX: แสดงผลแบบทีละแถวด้วย st.columns แทน st.dataframe เพื่อใส่ปุ่มลบ (🗑️) ต่อแถวได้
+        # เดิมมีแค่ "ล้างรายการทั้งหมด" ถ้าเลือกผิด 1 รายการต้องลบทิ้งทั้งหมดแล้วเลือกใหม่ทุกอัน
+        op_header_cols = st.columns([2.2, 1.3, 1.1, 1.1, 1.2, 0.6])
+        for col, label in zip(
+            op_header_cols,
+            [t["op_col_machine"], t["op_col_unit"], t["op_col_rate"], t["op_col_qty"], t["op_col_total"], ""]
+        ):
+            col.markdown(f"**{label}**")
+
+        op_to_delete = None
+        for i, op in enumerate(st.session_state["selected_operations"]):
+            row_cols = st.columns([2.2, 1.3, 1.1, 1.1, 1.2, 0.6])
+            row_cols[0].write(op["machine"])
+            row_cols[1].write(op["unit"])
+            row_cols[2].write(f"{op['rate']:,.2f}")
+            row_cols[3].write(f"{op['qty']:,.2f}")
+            row_cols[4].write(f"{op['total']:,.2f}")
+            if row_cols[5].button("🗑️", key=f"del_op_{i}", help="ลบแถวนี้" if lang == "TH" else "Delete this row"):
+                op_to_delete = i
+
+        if op_to_delete is not None:
+            st.session_state["selected_operations"].pop(op_to_delete)
+            st.rerun()
 
         col_clear_op, col_stat_op = st.columns([1, 3])
         with col_clear_op:
@@ -1426,11 +1444,29 @@ elif page == t["page_2_name"]:
 
     if st.session_state["selected_materials"]:
         st.markdown(f"###### {t['selected_mat_list']}")
-        mat_df = pd.DataFrame(st.session_state["selected_materials"])
 
-        display_df = mat_df[["cat", "name", "qty", "unit_price", "total_price"]].copy()
-        display_df.columns = ["Category / หมวดหมู่", "Material / ชื่อวัสดุ", "Qty / จำนวน", "Unit Price / ราคา", "Total / ราคารวม"]
-        st.dataframe(display_df, use_container_width=True)
+        # FIX: แสดงผลแบบทีละแถวเพื่อใส่ปุ่มลบ (🗑️) ต่อแถว — เลือกวัสดุผิด 1 ตัวลบเฉพาะแถวนั้นได้
+        mat_header_cols = st.columns([1.6, 2.2, 1.0, 1.2, 1.2, 0.6])
+        for col, label in zip(
+            mat_header_cols,
+            ["Category / หมวดหมู่", "Material / ชื่อวัสดุ", "Qty / จำนวน", "Unit Price / ราคา", "Total / ราคารวม", ""]
+        ):
+            col.markdown(f"**{label}**")
+
+        mat_to_delete = None
+        for i, item in enumerate(st.session_state["selected_materials"]):
+            row_cols = st.columns([1.6, 2.2, 1.0, 1.2, 1.2, 0.6])
+            row_cols[0].write(item["cat"])
+            row_cols[1].write(item["name"])
+            row_cols[2].write(f"{item['qty']:,.2f}")
+            row_cols[3].write(f"{item['unit_price']:,.2f}")
+            row_cols[4].write(f"{item['total_price']:,.2f}")
+            if row_cols[5].button("🗑️", key=f"del_mat_{i}", help="ลบแถวนี้" if lang == "TH" else "Delete this row"):
+                mat_to_delete = i
+
+        if mat_to_delete is not None:
+            st.session_state["selected_materials"].pop(mat_to_delete)
+            st.rerun()
 
         col_clear, col_stat = st.columns([1, 3])
         with col_clear:
@@ -1571,14 +1607,31 @@ elif page == t["page_2_name"]:
 
     if st.session_state["selected_finishes"]:
         st.markdown(f"###### {t['finish_selected_list']}")
-        finish_df = pd.DataFrame(st.session_state["selected_finishes"])
-        display_finish_df = finish_df[["type", "rate", "area", "total"]].copy()
-        display_finish_df["total_cost"] = finish_df["total_cost"]
-        display_finish_df.columns = [
-            t["finish_col_type"], t["finish_col_rate"], t["finish_col_area"], t["finish_col_total"],
-            "Total Cost (internal)" if lang == "EN" else "ต้นทุนภายใน (฿)",
-        ]
-        st.dataframe(display_finish_df, use_container_width=True)
+
+        # FIX: แสดงผลแบบทีละแถวเพื่อใส่ปุ่มลบ (🗑️) ต่อแถว — เลือกงานเคลือบผิวผิด 1 รายการ
+        # ลบเฉพาะแถวนั้นได้ ไม่ต้องกด "ล้างทั้งหมด" แล้วเลือกใหม่ทุกรายการ
+        cost_col_label = "Total Cost (internal)" if lang == "EN" else "ต้นทุนภายใน (฿)"
+        finish_header_cols = st.columns([2.4, 1.1, 1.1, 1.2, 1.3, 0.6])
+        for col, label in zip(
+            finish_header_cols,
+            [t["finish_col_type"], t["finish_col_rate"], t["finish_col_area"], t["finish_col_total"], cost_col_label, ""]
+        ):
+            col.markdown(f"**{label}**")
+
+        finish_to_delete = None
+        for i, item in enumerate(st.session_state["selected_finishes"]):
+            row_cols = st.columns([2.4, 1.1, 1.1, 1.2, 1.3, 0.6])
+            row_cols[0].write(item["type"])
+            row_cols[1].write(f"{item['rate']:,.2f}")
+            row_cols[2].write(f"{item['area']:,.4f}")
+            row_cols[3].write(f"{item['total']:,.2f}")
+            row_cols[4].write("—" if item.get("total_cost") is None else f"{item['total_cost']:,.2f}")
+            if row_cols[5].button("🗑️", key=f"del_finish_{i}", help="ลบแถวนี้" if lang == "TH" else "Delete this row"):
+                finish_to_delete = i
+
+        if finish_to_delete is not None:
+            st.session_state["selected_finishes"].pop(finish_to_delete)
+            st.rerun()
 
         finishing_margin = sum(
             (item["total"] - item["total_cost"])
