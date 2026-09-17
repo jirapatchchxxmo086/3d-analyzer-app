@@ -358,11 +358,6 @@ if "submesh_count" not in st.session_state:
 # 🛠️ Helper Functions & Constants
 # ==========================================
 SCALE_TO_M = 0.001
-
-# STL/OBJ/PLY/OFF files carry no unit metadata — trimesh just returns whatever
-# numbers are in the file. The app previously assumed every file was already
-# in millimeters (see FIX NOTE below), which silently produces wrong areas/
-# volumes/prices for files authored in cm, m, or inches. Let the user tell us.
 UNIT_TO_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "inch": 25.4}
 
 def process_and_clean_mesh(loaded_data):
@@ -569,9 +564,6 @@ HTML_TEMPLATE = Template("""
             geometry.computeBoundingSphere();
             const radius = geometry.boundingSphere.radius;
 
-            // FIX: near/far and orbit zoom limits now scale with the model instead
-            // of being fixed values, so large models don't get clipped by the far
-            // plane and small models don't get near-clipped when zoomed in close.
             camera.near = Math.max(radius / 500, 0.01);
             camera.far = Math.max(radius * 20, 2000);
             camera.updateProjectionMatrix();
@@ -674,8 +666,6 @@ if page == t["page_1_name"]:
         t["file_uploader"],
         type=["stl", "obj", "ply", "off", "3mf"]
     )
-    # Source file unit is fixed to mm (no dropdown) per request — all files in
-    # this workflow are authored in mm.
     file_unit_to_mm = UNIT_TO_MM["mm"]
 
     if uploaded_file is not None:
@@ -693,9 +683,6 @@ if page == t["page_1_name"]:
 
                 is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
-                # FIX: previously `mesh_mm.apply_scale(SCALE_TO_M * 1000.0)` == apply_scale(1.0),
-                # a no-op that silently assumed the source file was already in millimeters.
-                # Now it uses the unit the user picked above.
                 mesh_mm = mesh.copy()
                 mesh_mm.apply_scale(file_unit_to_mm)
                 base_extents = mesh_mm.extents
@@ -735,8 +722,7 @@ if page == t["page_1_name"]:
                 st.sidebar.caption(
                     "🔓 ปิดสวิตช์นี้เพื่อปรับกว้าง/ยาว/สูงอิสระจากกัน — รูปทรงโมเดลจะยืด/บีบตามค่าที่ตั้ง"
                     if lang == "TH" else
-                    "🔓 Turn this off to set width/length/height independently — the "
-                    "model's shape will stretch/squash to match."
+                    "🔓 Turn this off to set width/length/height independently — the model's shape will stretch/squash to match."
                 )
                 st.sidebar.number_input(t["size_w"], min_value=0.001, key="dim_w_mm", step=1.0, on_change=_sync_from_width)
                 st.sidebar.number_input(t["size_l"], min_value=0.001, key="dim_l_mm", step=1.0, on_change=_sync_from_length)
@@ -791,12 +777,6 @@ if page == t["page_1_name"]:
                         except Exception:
                             volume_m3 = 0.0
 
-                    # FIX: previously, if the mesh wasn't watertight AND convex_hull()
-                    # also failed/returned 0, volume_m3 stayed exactly 0 and that 0
-                    # silently flowed into every downstream calculation (page 2's 3D
-                    # print time estimate collapsed to program+setup only, with zero
-                    # machine time, because effective_volume got capped at 0). Two
-                    # more attempts before giving up:
                     if volume_m3 <= 0:
                         try:
                             repaired = final_mesh.copy()
@@ -809,9 +789,6 @@ if page == t["page_1_name"]:
                             pass
                     if volume_m3 <= 0:
                         try:
-                            # ASSUMPTION: ไม่รู้ solidity จริงของโมเดล ใช้ 40% ของปริมาตร
-                            # oriented bounding box เป็นค่ากลางๆ (ระหว่างโมเดลกลวงบางกับ
-                            # โมเดลตัน) — ประมาณคร่าวมาก แจ้งเตือนผู้ใช้ชัดเจนในหน้าเว็บ
                             obb_volume_mm3 = final_mesh.bounding_box_oriented.volume
                             volume_m3 = (obb_volume_mm3 * 0.4) / 1_000_000_000.0
                             used_bbox_estimate = True
@@ -891,17 +868,6 @@ if page == t["page_1_name"]:
                         "ปริมาตร (ประมาณจาก Bounding Box)" if lang == "TH" else "Volume (Bounding Box estimate)",
                         f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm"
                     )
-                    st.warning(
-                        "⚠️ โมเดลนี้คำนวณปริมาตรแบบละเอียดไม่ได้ (ไม่ watertight และ "
-                        "Convex Hull ก็ล้มเหลว) ตัวเลขนี้จึงเป็นการประมาณคร่าวๆ จาก "
-                        "Bounding Box เท่านั้น (สมมติความตัน 40%) ไม่แม่นยำเท่าปริมาตรจริง "
-                        "— ควรตรวจสอบไฟล์ 3D ต้นฉบับว่ามีรูรั่ว/geometry เสียหรือไม่"
-                        if lang == "TH" else
-                        "⚠️ Couldn't compute an exact volume for this mesh (not "
-                        "watertight, and Convex Hull also failed). This is a rough "
-                        "estimate from the bounding box only (assuming 40% solidity) — "
-                        "check the source 3D file for holes/broken geometry."
-                    )
                 elif used_convex_hull and volume_m3 > 0:
                     res_b.metric(t["vol_hull"], f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
                     st.info(t["vol_note"])
@@ -976,12 +942,6 @@ elif page == t["page_2_name"]:
         DEFAULT_FOAM_WASTE_FACTOR,
     )
 
-    # FIX: these were previously called with no caching, so every single widget
-    # interaction on this page (a slider drag, a number_input change, etc.)
-    # re-read the master-data source (Excel/Sheets) from scratch. That's the
-    # most likely cause of the page feeling slow/laggy. st.cache_data keeps the
-    # result in memory and only reloads if the underlying function's code/args
-    # change or the TTL expires.
     @st.cache_data(ttl=300, show_spinner=False)
     def _cached_material_master_db():
         return load_material_master_db()
@@ -1010,9 +970,6 @@ elif page == t["page_2_name"]:
     def _cached_complexity_hours():
         return load_complexity_hours()
 
-    # FIX: previously an unhandled network/token error here would crash the whole
-    # page with a raw traceback. Now it shows a message the user can act on, with
-    # a button to retry (clears the 5-minute cache so the next click re-fetches).
     try:
         MATERIAL_MASTER_DB = _cached_material_master_db()
         COAT_PROCESS_RATES = _cached_coat_process_rates()
@@ -1028,9 +985,6 @@ elif page == t["page_2_name"]:
             st.rerun()
         st.stop()
 
-    # FIX: check_for_duplicate_items() existed in data_loader.py but was never
-    # called, so duplicate rows in the Sheet silently overwrote each other with
-    # no warning. Surface it here.
     dq_warnings = get_data_quality_warnings()
     if dq_warnings:
         with st.expander(
@@ -1042,11 +996,6 @@ elif page == t["page_2_name"]:
             for w in dq_warnings:
                 st.write(f"- {w}")
 
-    # FIX: previously hardcoded here (and the hour tables stopped at level 8 even
-    # though the complexity slider goes to 10). Now sourced from the LaborRates /
-    # ComplexityHours sheets via Code.gs, so editing the sheet is enough to
-    # update these — no code deploy needed, and any level actually defined in
-    # the sheet is honored (not capped at 8).
     HARD_COAT_HOURS = {lvl: v["hard_coat"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
     SANDING_HOURS = {lvl: v["sanding"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
     PAINTING_HOURS = {lvl: v["painting"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
@@ -1217,8 +1166,6 @@ elif page == t["page_2_name"]:
     if st.session_state["selected_operations"]:
         st.markdown(f"###### {t['op_selected_list']}")
 
-        # FIX: แสดงผลแบบทีละแถวด้วย st.columns แทน st.dataframe เพื่อใส่ปุ่มลบ (🗑️) ต่อแถวได้
-        # เดิมมีแค่ "ล้างรายการทั้งหมด" ถ้าเลือกผิด 1 รายการต้องลบทิ้งทั้งหมดแล้วเลือกใหม่ทุกอัน
         op_header_cols = st.columns([2.2, 1.3, 1.1, 1.1, 1.2, 0.6])
         for col, label in zip(
             op_header_cols,
@@ -1256,8 +1203,6 @@ elif page == t["page_2_name"]:
     current_mesh = st.session_state.get("mesh")
     submesh_count = st.session_state.get("submesh_count", 1)
 
-    # ค่า wall_thickness เริ่มต้น (ใช้ร่วมกันทั้ง visualizer และ block estimator ด้านล่าง
-    # แม้ผู้ใช้ยังไม่เปิด visualizer เพื่อไม่ให้ block estimator พังหา key ไม่เจอ)
     if "p2_wall_thick" not in st.session_state:
         st.session_state["p2_wall_thick"] = 75
 
@@ -1331,19 +1276,8 @@ elif page == t["page_2_name"]:
     # ==========================================
     # 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)
     # ==========================================
-    # ใช้สูตร hollow-shell (bbox ลบส่วนกลวงตาม wall_thickness) หารด้วยปริมาตรก้อนมาตรฐาน
-    # แล้วเผื่อ waste_factor — ใช้ wall_thickness เดียวกับ visualizer ด้านบน (ไม่ต้องตั้งซ้ำ)
-    # ไม่มี UI ให้ตั้งค่าขนาดก้อน/waste factor แยก (ตามที่ขอ) — ใช้ค่า default คงที่
-    # ภายใน แสดงผลแค่ตัวเลขแนะนำทศนิยม 1 ตำแหน่ง เหมือนตัวอย่าง "1.8 ก้อน"
-    #
-    # ถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) คำนวณแยกทีละชิ้นแล้วรวมยอด แทนที่จะใช้
-    # bbox รวมทั้งโมเดล ซึ่งจะเผื่อพื้นที่ว่างระหว่างชิ้นส่วนเกินจริง — ถ้า get_submeshes()
-    # ใช้งานไม่ได้ (เช่น trimesh/networkx เวอร์ชันไม่เข้ากัน) จะ fallback ไปใช้ bbox รวม
-    # แทน ไม่ทำให้ทั้งหน้าพัง
     st.markdown("---")
     st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
-
-    current_wall_thick = float(st.session_state.get("p2_wall_thick", 75))
 
     submeshes_for_blocks = []
     submesh_split_failed = False
@@ -1351,9 +1285,6 @@ elif page == t["page_2_name"]:
         try:
             submeshes_for_blocks = get_submeshes(current_mesh)
         except Exception:
-            # FIX: get_submeshes() (mesh.split() ผ่าน trimesh -> networkx) เคยพังทั้งหน้า
-            # เพราะไม่มีการดักจับ error เลย ตอนนี้ถ้าแยกชิ้นส่วนไม่สำเร็จ จะ fallback ไปคำนวณ
-            # จาก bounding box รวมทั้งโมเดลแทน แล้วแจ้งเตือนผู้ใช้เฉยๆ ไม่ทำให้แอป error
             submesh_split_failed = True
 
     total_blocks = 0.0
@@ -1390,8 +1321,6 @@ elif page == t["page_2_name"]:
                 "whole-model bounding box instead (may slightly overestimate for models with "
                 "widely separated parts)."
             )
-        # ตามที่ขอ: โชว์แค่ตัวเลขเดียว "ปริมาณวัตถุดิบโฟมที่ต้องใช้ X ชิ้น" ไม่ต้องแยก
-        # ยอดรวม/เฉลี่ยต่อชิ้นให้ซับซ้อน — total_blocks คือยอดรวมทั้ง production_qty แล้ว
         st.info(
             f"ปริมาณวัตถุดิบโฟมที่ต้องใช้: {total_blocks:.1f} ชิ้น"
             if lang == "TH" else
@@ -1446,7 +1375,6 @@ elif page == t["page_2_name"]:
     if st.session_state["selected_materials"]:
         st.markdown(f"###### {t['selected_mat_list']}")
 
-        # FIX: แสดงผลแบบทีละแถวเพื่อใส่ปุ่มลบ (🗑️) ต่อแถว — เลือกวัสดุผิด 1 ตัวลบเฉพาะแถวนั้นได้
         mat_header_cols = st.columns([1.6, 2.2, 1.0, 1.2, 1.2, 0.6])
         for col, label in zip(
             mat_header_cols,
@@ -1609,8 +1537,6 @@ elif page == t["page_2_name"]:
     if st.session_state["selected_finishes"]:
         st.markdown(f"###### {t['finish_selected_list']}")
 
-        # FIX: แสดงผลแบบทีละแถวเพื่อใส่ปุ่มลบ (🗑️) ต่อแถว — เลือกงานเคลือบผิวผิด 1 รายการ
-        # ลบเฉพาะแถวนั้นได้ ไม่ต้องกด "ล้างทั้งหมด" แล้วเลือกใหม่ทุกรายการ
         cost_col_label = "Total Cost (internal)" if lang == "EN" else "ต้นทุนภายใน (฿)"
         finish_header_cols = st.columns([2.4, 1.1, 1.1, 1.2, 1.3, 0.6])
         for col, label in zip(
