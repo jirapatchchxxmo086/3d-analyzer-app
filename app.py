@@ -8,7 +8,7 @@ import pandas as pd
 from string import Template
 import streamlit.components.v1 as components
 import auth
-from grid_visualizer import create_foam_grid_visualizer
+from grid_visualizer import create_foam_grid_visualizer, get_submeshes
 
 auth.require_login()
 
@@ -966,7 +966,15 @@ elif page == t["page_2_name"]:
         SheetAPIError,
         COAT_PROCESS_SHEET_NAME,
     )
-    from machining_estimator import estimate_foam_cnc_hours, estimate_3d_print_hours
+    from machining_estimator import (
+        estimate_foam_cnc_hours,
+        estimate_3d_print_hours,
+        estimate_foam_blocks_needed,
+        DEFAULT_FOAM_BLOCK_W_MM,
+        DEFAULT_FOAM_BLOCK_L_MM,
+        DEFAULT_FOAM_BLOCK_H_MM,
+        DEFAULT_FOAM_WASTE_FACTOR,
+    )
 
     # FIX: these were previously called with no caching, so every single widget
     # interaction on this page (a slider drag, a number_input change, etc.)
@@ -1227,6 +1235,13 @@ elif page == t["page_2_name"]:
     x_mm = st.session_state.get("width_x_mm", 0.0)
     y_mm = st.session_state.get("length_y_mm", 0.0)
     z_mm = st.session_state.get("height_z_mm", 0.0)
+    current_mesh = st.session_state.get("mesh")
+    submesh_count = st.session_state.get("submesh_count", 1)
+
+    # ค่า wall_thickness เริ่มต้น (ใช้ร่วมกันทั้ง visualizer และ block estimator ด้านล่าง
+    # แม้ผู้ใช้ยังไม่เปิด visualizer เพื่อไม่ให้ block estimator พังหา key ไม่เจอ)
+    if "p2_wall_thick" not in st.session_state:
+        st.session_state["p2_wall_thick"] = 75
 
     if x_mm > 0 and y_mm > 0 and z_mm > 0:
         st.markdown("---")
@@ -1237,8 +1252,6 @@ elif page == t["page_2_name"]:
             with col_v2:
                 wall_thick = st.slider("ความหนาเปลือกโฟม Hollow Shell (มม.)", 30, 150, 75, 5, key="p2_wall_thick")
 
-            current_mesh = st.session_state.get("mesh")
-            submesh_count = st.session_state.get("submesh_count", 1)
             current_slice_mode = "modular" if submesh_count > 1 else "planar"
 
             fig_grid = create_foam_grid_visualizer(
@@ -1293,30 +1306,104 @@ elif page == t["page_2_name"]:
             else:
                 est_time_saved = 35 if is_flat else (40 if aspect_ratio > 2.2 else 20)
                 est_material_saved = 30 if is_flat else (35 if aspect_ratio > 2.2 else 15)
-                
+
             st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
             st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
 
-# =========================================================
-# 📦 FOAM BLOCK ESTIMATOR (แสดงจำนวนก้อนโฟมที่แนะนำ)
-# =========================================================
-st.markdown("---")
-st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
+    # ==========================================
+    # 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)
+    # ==========================================
+    # ใช้สูตร hollow-shell (bbox ลบส่วนกลวงตาม wall_thickness) หารด้วยปริมาตรก้อนมาตรฐาน
+    # แล้วเผื่อ waste_factor — ใช้ wall_thickness เดียวกับ visualizer ด้านบน (ไม่ต้องตั้งซ้ำ)
+    # ถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) คำนวณแยกทีละชิ้นแล้วรวมยอด แทนที่จะใช้
+    # bbox รวมทั้งโมเดล ซึ่งจะเผื่อพื้นที่ว่างระหว่างชิ้นส่วนเกินจริง
+    st.markdown("---")
+    st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
 
-# ขนาดก้อนโฟมดิบมาตรฐาน (1.0 x 1.2 x 2.4 เมตร -> มิลลิเมตร)
-DEFAULT_BLOCK_VOL_CM3 = (1000.0 * 1200.0 * 2400.0) / 1000.0
-# เผื่อ Scrap Allowance + การตัดต่อก้อนโฟมทรง 3D ซับซ้อน (80%)
-SCULPTURE_3D_ALLOWANCE_PCT = 80.0
+    with st.expander("⚙️ ตั้งค่าก้อนโฟมมาตรฐาน", expanded=False):
+        fb1, fb2, fb3, fb4 = st.columns(4)
+        with fb1:
+            block_w = st.number_input(
+                "กว้าง (mm)" if lang == "TH" else "Width (mm)",
+                min_value=1.0, value=DEFAULT_FOAM_BLOCK_W_MM, step=10.0, key="foam_block_w"
+            )
+        with fb2:
+            block_l = st.number_input(
+                "ยาว (mm)" if lang == "TH" else "Length (mm)",
+                min_value=1.0, value=DEFAULT_FOAM_BLOCK_L_MM, step=10.0, key="foam_block_l"
+            )
+        with fb3:
+            block_h = st.number_input(
+                "สูง (mm)" if lang == "TH" else "Height (mm)",
+                min_value=1.0, value=DEFAULT_FOAM_BLOCK_H_MM, step=10.0, key="foam_block_h"
+            )
+        with fb4:
+            foam_waste_factor = st.number_input(
+                "Waste Factor", min_value=1.0, value=DEFAULT_FOAM_WASTE_FACTOR, step=0.05, key="foam_waste_factor"
+            )
+        st.caption(
+            "💡 ขนาดก้อนเริ่มต้น 600×1220×2440 มม. เป็นขนาดแผ่นโฟมมาตรฐานทั่วไป — ปรับให้ตรงกับ "
+            "ก้อนที่โรงงานสั่งซื้อจริงได้ที่นี่ ค่า Waste Factor คือส่วนเผื่อเศษจากการตัด/ต่อกาว/วางแนว"
+            if lang == "TH" else
+            "💡 Default block size 600×1220×2440 mm is a common standard foam sheet size — "
+            "adjust to match what your factory actually orders. Waste Factor covers offcut/"
+            "joining/orientation losses."
+        )
 
-# คำนวณปริมาตรรวมและจำนวนก้อน (ทศนิยม 1 ตำแหน่ง)
-total_bbox_vol_cm3 = bbox_volume_cm3 * production_qty
-net_blocks = total_bbox_vol_cm3 / DEFAULT_BLOCK_VOL_CM3 if DEFAULT_BLOCK_VOL_CM3 > 0 else 0.0
-recommended_blocks_float = net_blocks * (1.0 + (SCULPTURE_3D_ALLOWANCE_PCT / 100.0))
+    current_wall_thick = float(st.session_state.get("p2_wall_thick", 75))
+    submeshes_for_blocks = get_submeshes(current_mesh) if current_mesh is not None else []
 
-# แสดงผล Card คำนวณ
-st.info(f"💡 **คำแนะนำการสั่งซื้อ:** ชิ้นงานนี้ใช้โฟมประมาณ **{recommended_blocks_float:.1f} ก้อน**")
-# ==========================================
-    # 📦 SECTION 4: ระบบเลือกวัสดุจาก Master Data
+    block_rows = []
+    total_blocks = 0
+
+    if submesh_count > 1 and len(submeshes_for_blocks) > 1:
+        for idx, sm in enumerate(submeshes_for_blocks):
+            ext = sm.extents
+            calc = estimate_foam_blocks_needed(
+                width_mm=float(ext[0]), length_mm=float(ext[1]), height_mm=float(ext[2]),
+                block_w_mm=block_w, block_l_mm=block_l, block_h_mm=block_h,
+                wall_thickness_mm=current_wall_thick, waste_factor=foam_waste_factor,
+            )
+            per_part_total = calc["blocks_needed"] * production_qty
+            total_blocks += per_part_total
+            block_rows.append({
+                ("ชิ้นส่วน" if lang == "TH" else "Part"): f"Part {idx + 1}",
+                ("ก้อน/ชิ้น" if lang == "TH" else "Blocks/pc"): calc["blocks_needed"],
+                (f"รวม × {production_qty} ชิ้น" if lang == "TH" else f"Total × {production_qty} pcs"): per_part_total,
+            })
+    elif x_mm > 0 and y_mm > 0 and z_mm > 0:
+        calc = estimate_foam_blocks_needed(
+            width_mm=x_mm, length_mm=y_mm, height_mm=z_mm,
+            block_w_mm=block_w, block_l_mm=block_l, block_h_mm=block_h,
+            wall_thickness_mm=current_wall_thick, waste_factor=foam_waste_factor,
+        )
+        total_blocks = calc["blocks_needed"] * production_qty
+        block_rows.append({
+            ("ชิ้นส่วน" if lang == "TH" else "Part"): ("ทั้งชิ้น" if lang == "TH" else "Whole model"),
+            ("ก้อน/ชิ้น" if lang == "TH" else "Blocks/pc"): calc["blocks_needed"],
+            (f"รวม × {production_qty} ชิ้น" if lang == "TH" else f"Total × {production_qty} pcs"): total_blocks,
+        })
+
+    if block_rows:
+        st.dataframe(pd.DataFrame(block_rows), use_container_width=True)
+        st.info(
+            f"💡 **คำแนะนำการสั่งซื้อ:** ใช้โฟมทั้งหมดประมาณ **{total_blocks} ก้อน** "
+            f"(ขนาดก้อน {block_w:.0f}×{block_l:.0f}×{block_h:.0f} mm, "
+            f"wall thickness {current_wall_thick:.0f} mm, waste factor {foam_waste_factor})"
+            if lang == "TH" else
+            f"💡 **Order recommendation:** approx. **{total_blocks} blocks** of foam needed "
+            f"(block size {block_w:.0f}×{block_l:.0f}×{block_h:.0f} mm, "
+            f"wall thickness {current_wall_thick:.0f} mm, waste factor {foam_waste_factor})"
+        )
+    else:
+        st.info(
+            "อัปโหลดไฟล์ 3D ที่หน้าแรกก่อน เพื่อคำนวณจำนวนก้อนโฟม"
+            if lang == "TH" else
+            "Upload a 3D file on Page 1 first to calculate the number of foam blocks needed."
+        )
+
+    # ==========================================
+    # 📦 ระบบเลือกรายการวัสดุจาก Master Data
     # ==========================================
     st.markdown("---")
     st.markdown(f"##### {t['use_mat']}")
