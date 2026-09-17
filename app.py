@@ -1315,85 +1315,68 @@ elif page == t["page_2_name"]:
     # ==========================================
     # ใช้สูตร hollow-shell (bbox ลบส่วนกลวงตาม wall_thickness) หารด้วยปริมาตรก้อนมาตรฐาน
     # แล้วเผื่อ waste_factor — ใช้ wall_thickness เดียวกับ visualizer ด้านบน (ไม่ต้องตั้งซ้ำ)
+    # ไม่มี UI ให้ตั้งค่าขนาดก้อน/waste factor แยก (ตามที่ขอ) — ใช้ค่า default คงที่
+    # ภายใน แสดงผลแค่ตัวเลขแนะนำทศนิยม 1 ตำแหน่ง เหมือนตัวอย่าง "1.8 ก้อน"
+    #
     # ถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) คำนวณแยกทีละชิ้นแล้วรวมยอด แทนที่จะใช้
-    # bbox รวมทั้งโมเดล ซึ่งจะเผื่อพื้นที่ว่างระหว่างชิ้นส่วนเกินจริง
+    # bbox รวมทั้งโมเดล ซึ่งจะเผื่อพื้นที่ว่างระหว่างชิ้นส่วนเกินจริง — ถ้า get_submeshes()
+    # ใช้งานไม่ได้ (เช่น trimesh/networkx เวอร์ชันไม่เข้ากัน) จะ fallback ไปใช้ bbox รวม
+    # แทน ไม่ทำให้ทั้งหน้าพัง
     st.markdown("---")
     st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
 
-    with st.expander("⚙️ ตั้งค่าก้อนโฟมมาตรฐาน", expanded=False):
-        fb1, fb2, fb3, fb4 = st.columns(4)
-        with fb1:
-            block_w = st.number_input(
-                "กว้าง (mm)" if lang == "TH" else "Width (mm)",
-                min_value=1.0, value=DEFAULT_FOAM_BLOCK_W_MM, step=10.0, key="foam_block_w"
-            )
-        with fb2:
-            block_l = st.number_input(
-                "ยาว (mm)" if lang == "TH" else "Length (mm)",
-                min_value=1.0, value=DEFAULT_FOAM_BLOCK_L_MM, step=10.0, key="foam_block_l"
-            )
-        with fb3:
-            block_h = st.number_input(
-                "สูง (mm)" if lang == "TH" else "Height (mm)",
-                min_value=1.0, value=DEFAULT_FOAM_BLOCK_H_MM, step=10.0, key="foam_block_h"
-            )
-        with fb4:
-            foam_waste_factor = st.number_input(
-                "Waste Factor", min_value=1.0, value=DEFAULT_FOAM_WASTE_FACTOR, step=0.05, key="foam_waste_factor"
-            )
-        st.caption(
-            "💡 ขนาดก้อนเริ่มต้น 600×1220×2440 มม. เป็นขนาดแผ่นโฟมมาตรฐานทั่วไป — ปรับให้ตรงกับ "
-            "ก้อนที่โรงงานสั่งซื้อจริงได้ที่นี่ ค่า Waste Factor คือส่วนเผื่อเศษจากการตัด/ต่อกาว/วางแนว"
-            if lang == "TH" else
-            "💡 Default block size 600×1220×2440 mm is a common standard foam sheet size — "
-            "adjust to match what your factory actually orders. Waste Factor covers offcut/"
-            "joining/orientation losses."
-        )
-
     current_wall_thick = float(st.session_state.get("p2_wall_thick", 75))
-    submeshes_for_blocks = get_submeshes(current_mesh) if current_mesh is not None else []
 
-    block_rows = []
-    total_blocks = 0
+    submeshes_for_blocks = []
+    submesh_split_failed = False
+    if submesh_count > 1 and current_mesh is not None:
+        try:
+            submeshes_for_blocks = get_submeshes(current_mesh)
+        except Exception:
+            # FIX: get_submeshes() (mesh.split() ผ่าน trimesh -> networkx) เคยพังทั้งหน้า
+            # เพราะไม่มีการดักจับ error เลย ตอนนี้ถ้าแยกชิ้นส่วนไม่สำเร็จ จะ fallback ไปคำนวณ
+            # จาก bounding box รวมทั้งโมเดลแทน แล้วแจ้งเตือนผู้ใช้เฉยๆ ไม่ทำให้แอป error
+            submesh_split_failed = True
+
+    total_blocks = 0.0
 
     if submesh_count > 1 and len(submeshes_for_blocks) > 1:
-        for idx, sm in enumerate(submeshes_for_blocks):
+        per_part_blocks = []
+        for sm in submeshes_for_blocks:
             ext = sm.extents
             calc = estimate_foam_blocks_needed(
                 width_mm=float(ext[0]), length_mm=float(ext[1]), height_mm=float(ext[2]),
-                block_w_mm=block_w, block_l_mm=block_l, block_h_mm=block_h,
-                wall_thickness_mm=current_wall_thick, waste_factor=foam_waste_factor,
+                block_w_mm=DEFAULT_FOAM_BLOCK_W_MM, block_l_mm=DEFAULT_FOAM_BLOCK_L_MM,
+                block_h_mm=DEFAULT_FOAM_BLOCK_H_MM,
+                wall_thickness_mm=current_wall_thick, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
             )
-            per_part_total = calc["blocks_needed"] * production_qty
-            total_blocks += per_part_total
-            block_rows.append({
-                ("ชิ้นส่วน" if lang == "TH" else "Part"): f"Part {idx + 1}",
-                ("ก้อน/ชิ้น" if lang == "TH" else "Blocks/pc"): calc["blocks_needed"],
-                (f"รวม × {production_qty} ชิ้น" if lang == "TH" else f"Total × {production_qty} pcs"): per_part_total,
-            })
+            per_part_blocks.append(calc["blocks_needed"])
+        total_blocks = round(sum(per_part_blocks) * production_qty, 1)
     elif x_mm > 0 and y_mm > 0 and z_mm > 0:
         calc = estimate_foam_blocks_needed(
             width_mm=x_mm, length_mm=y_mm, height_mm=z_mm,
-            block_w_mm=block_w, block_l_mm=block_l, block_h_mm=block_h,
-            wall_thickness_mm=current_wall_thick, waste_factor=foam_waste_factor,
+            block_w_mm=DEFAULT_FOAM_BLOCK_W_MM, block_l_mm=DEFAULT_FOAM_BLOCK_L_MM,
+            block_h_mm=DEFAULT_FOAM_BLOCK_H_MM,
+            wall_thickness_mm=current_wall_thick, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
         )
-        total_blocks = calc["blocks_needed"] * production_qty
-        block_rows.append({
-            ("ชิ้นส่วน" if lang == "TH" else "Part"): ("ทั้งชิ้น" if lang == "TH" else "Whole model"),
-            ("ก้อน/ชิ้น" if lang == "TH" else "Blocks/pc"): calc["blocks_needed"],
-            (f"รวม × {production_qty} ชิ้น" if lang == "TH" else f"Total × {production_qty} pcs"): total_blocks,
-        })
+        total_blocks = round(calc["blocks_needed"] * production_qty, 1)
 
-    if block_rows:
-        st.dataframe(pd.DataFrame(block_rows), use_container_width=True)
+    if x_mm > 0 and y_mm > 0 and z_mm > 0:
+        if submesh_split_failed:
+            st.caption(
+                "⚠️ แยกชิ้นส่วนโมเดลอัตโนมัติไม่สำเร็จ ตัวเลขด้านล่างคำนวณจาก Bounding Box "
+                "รวมทั้งโมเดลแทน (อาจเผื่อเนื้อโฟมเกินจริงเล็กน้อยถ้าโมเดลมีหลายชิ้นแยกห่างกัน)"
+                if lang == "TH" else
+                "⚠️ Automatic part-splitting failed — the number below is calculated from the "
+                "whole-model bounding box instead (may slightly overestimate for models with "
+                "widely separated parts)."
+            )
         st.info(
-            f"💡 **คำแนะนำการสั่งซื้อ:** ใช้โฟมทั้งหมดประมาณ **{total_blocks} ก้อน** "
-            f"(ขนาดก้อน {block_w:.0f}×{block_l:.0f}×{block_h:.0f} mm, "
-            f"wall thickness {current_wall_thick:.0f} mm, waste factor {foam_waste_factor})"
+            f"💡 **คำแนะนำ:** ชิ้นงานนี้ใช้โฟมประมาณ **{total_blocks:.1f} ก้อน** "
+            f"(จำนวน {production_qty} ชิ้น)"
             if lang == "TH" else
-            f"💡 **Order recommendation:** approx. **{total_blocks} blocks** of foam needed "
-            f"(block size {block_w:.0f}×{block_l:.0f}×{block_h:.0f} mm, "
-            f"wall thickness {current_wall_thick:.0f} mm, waste factor {foam_waste_factor})"
+            f"💡 **Recommended:** this job needs approximately **{total_blocks:.1f} block(s)** "
+            f"of foam (for {production_qty} pcs)"
         )
     else:
         st.info(
