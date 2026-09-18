@@ -3,6 +3,12 @@ import numpy as np
 import trimesh
 import math
 
+# ขนาดหน้าตัดก้อนโฟมมาตรฐาน (มม.) สำหรับวาดกริดอ้างอิงในภาพจำลอง
+# 600 = ด้านกว้าง (แกน X), 1200 = ด้านยาว (แกน Y)
+FOAM_GRID_WIDTH_MM = 600.0
+FOAM_GRID_LENGTH_MM = 1200.0
+
+
 def get_submeshes(mesh):
     if mesh is None or not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
         return []
@@ -60,11 +66,12 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
 
             vertices = working_mesh.vertices.copy()
             bounds = working_mesh.bounds
-            center = (bounds[0] + bounds[1]) / 2.0
-            
-            # จัดตำแหน่งให้อยู่ตรงกลาง XY และฐาน Z=0
-            vertices[:, 0] -= center[0]
-            vertices[:, 1] -= center[1]
+
+            # FIX (ตามที่ขอ): เดิม X,Y ถูก "จัดกึ่งกลาง" ให้ center=0,0 ส่วน Z เริ่มที่ 0
+            # อยู่ที่ฐานอยู่แล้ว — ตอนนี้ X,Y ก็เริ่มที่ 0 ที่ขอบ (มุม) ของชิ้นงานเหมือน Z
+            # ด้วย ให้จุด (0,0,0) อยู่ที่มุมล่างของ bounding box ทั้ง 3 แกน แทนการจัดกึ่งกลาง
+            vertices[:, 0] -= bounds[0][0]
+            vertices[:, 1] -= bounds[0][1]
             vertices[:, 2] -= bounds[0][2]
             
             fig.add_trace(go.Mesh3d(
@@ -78,8 +85,10 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
             by0, by1 = min_b[1], max_b[1]
             bz0, bz1 = 0, max_b[2]
         else:
-            bx0, bx1 = -x_mm / 2.0, x_mm / 2.0
-            by0, by1 = -y_mm / 2.0, y_mm / 2.0
+            # FIX (ตามที่ขอ): เดิมกล่องอยู่กึ่งกลาง (-x_mm/2 ถึง x_mm/2) — ตอนนี้เริ่มที่ 0
+            # ที่ขอบ เหมือนกรณีมี mesh ด้านบน
+            bx0, bx1 = 0.0, x_mm
+            by0, by1 = 0.0, y_mm
             bz0, bz1 = 0, z_mm
 
         # แสดง Bounding Box บล็อกโฟมรวม
@@ -95,7 +104,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
             color='#38BDF8', opacity=0.15, showlegend=False
         ))
 
-        # แสดงระนาบตัดแยกชั้นโฟม
+        # แสดงระนาบตัดแยกชั้นโฟม (ตามความสูง, จากสไลเดอร์ max_segment_mm)
         total_height = bz1 - bz0
         num_slices = math.ceil(total_height / max_segment_mm) if max_segment_mm > 0 else 1
         for s in range(1, num_slices):
@@ -108,6 +117,38 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_th
                     mode='lines',
                     line=dict(color='#0284C7', width=3, dash='dash'),
                     name=f'ระนาบตัด Z={z_plane/1000:.1f}m'
+                ))
+
+        # FIX (ตามที่ขอ): เพิ่มกริดอ้างอิงขนาดหน้าตัดก้อนโฟมมาตรฐาน 600×1200 มม.
+        # (600=กว้าง/แกน X, 1200=ยาว/แกน Y) ให้เห็นภาพว่าหน้าตัดของชิ้นงานเทียบกับขนาด
+        # แผ่นโฟมมาตรฐานแล้วกว้าง/ยาวกี่แผ่น — เส้นแนวตั้งคั่นทุกระยะ X=600mm
+        total_width = bx1 - bx0
+        num_x_lines = math.floor(total_width / FOAM_GRID_WIDTH_MM) if FOAM_GRID_WIDTH_MM > 0 else 0
+        for s in range(1, num_x_lines + 1):
+            x_plane = bx0 + s * FOAM_GRID_WIDTH_MM
+            if x_plane < bx1:
+                fig.add_trace(go.Scatter3d(
+                    x=[x_plane, x_plane, x_plane, x_plane, x_plane],
+                    y=[by0, by1, by1, by0, by0],
+                    z=[bz0, bz0, bz1, bz1, bz0],
+                    mode='lines',
+                    line=dict(color='#F59E0B', width=2, dash='dot'),
+                    name=f'กริดโฟม X={x_plane:.0f}mm', showlegend=False
+                ))
+
+        # เส้นแนวตั้งคั่นทุกระยะ Y=1200mm
+        total_length = by1 - by0
+        num_y_lines = math.floor(total_length / FOAM_GRID_LENGTH_MM) if FOAM_GRID_LENGTH_MM > 0 else 0
+        for s in range(1, num_y_lines + 1):
+            y_plane = by0 + s * FOAM_GRID_LENGTH_MM
+            if y_plane < by1:
+                fig.add_trace(go.Scatter3d(
+                    x=[bx0, bx1, bx1, bx0, bx0],
+                    y=[y_plane, y_plane, y_plane, y_plane, y_plane],
+                    z=[bz0, bz0, bz1, bz1, bz0],
+                    mode='lines',
+                    line=dict(color='#10B981', width=2, dash='dot'),
+                    name=f'กริดโฟม Y={y_plane:.0f}mm', showlegend=False
                 ))
 
     else:
