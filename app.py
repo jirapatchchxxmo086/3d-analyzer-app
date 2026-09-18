@@ -1254,19 +1254,10 @@ elif page == t["page_2_name"]:
     current_mesh = st.session_state.get("mesh")
     submesh_count = st.session_state.get("submesh_count", 1)
 
-    # ค่า wall_thickness เริ่มต้น (ใช้ร่วมกันทั้ง visualizer และ block estimator ด้านล่าง
-    # แม้ผู้ใช้ยังไม่เปิด visualizer เพื่อไม่ให้ block estimator พังหา key ไม่เจอ)
-    if "p2_wall_thick" not in st.session_state:
-        st.session_state["p2_wall_thick"] = 75
-
     if x_mm > 0 and y_mm > 0 and z_mm > 0:
         st.markdown("---")
         with st.expander("🧩 ภาพจำลองผังการตัดแบ่งบล็อกโฟม (Foam Slicing Visualizer)", expanded=True):
-            col_v1, col_v2 = st.columns(2)
-            with col_v1:
-                max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 1.0, 3.0, 1.0, 0.1, key="p2_max_seg")
-            with col_v2:
-                wall_thick = st.slider("ความหนาเปลือกโฟม Hollow Shell (มม.)", 30, 150, 75, 5, key="p2_wall_thick")
+            max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 1.0, 3.0, 1.0, 0.1, key="p2_max_seg")
 
             current_slice_mode = "modular" if submesh_count > 1 else "planar"
 
@@ -1275,7 +1266,6 @@ elif page == t["page_2_name"]:
                 y_mm=y_mm,
                 z_mm=z_mm,
                 max_segment_mm=max_seg_m * 1000.0,
-                wall_thickness_mm=wall_thick,
                 mesh=current_mesh,
                 slice_mode=current_slice_mode
             )
@@ -1329,8 +1319,9 @@ elif page == t["page_2_name"]:
     # ==========================================
     # 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)
     # ==========================================
-    # ใช้สูตร hollow-shell (bbox ลบส่วนกลวงตาม wall_thickness) หารด้วยปริมาตรก้อนมาตรฐาน
-    # แล้วเผื่อ waste_factor — ใช้ wall_thickness เดียวกับ visualizer ด้านบน (ไม่ต้องตั้งซ้ำ)
+    # ใช้สูตร height-only: จำนวนก้อน = ความสูง ÷ max_segment_mm (สมมติว่าหน้าตัดก้อนคลุม
+    # พื้นที่โมเดลได้พอดีเสมอ ตามที่ยืนยันจากการเทียบภาพจำลองจริง) — ใช้ max_segment_mm
+    # เดียวกับสไลเดอร์ visualizer ด้านบน (ไม่ต้องตั้งซ้ำ)
     # ไม่มี UI ให้ตั้งค่าขนาดก้อน/waste factor แยก (ตามที่ขอ) — ใช้ค่า default คงที่
     # ภายใน แสดงผลแค่ตัวเลขแนะนำทศนิยม 1 ตำแหน่ง เหมือนตัวอย่าง "1.8 ก้อน"
     #
@@ -1519,7 +1510,7 @@ elif page == t["page_2_name"]:
         hc_cat = st.radio("—", HARDCOAT_CATEGORIES, horizontal=True, key="hc_cat", label_visibility="collapsed")
 
         if hc_cat == HARDCOAT_CATEGORIES[0]:
-            c1, c2, c3, c4 = st.columns([2, 1.3, 1.3, 1])
+            c1, c2, c3, c4, c5 = st.columns([1.8, 1.1, 1.1, 1.1, 1])
             with c1:
                 hc_item = st.selectbox(t["finish_select"], list(COAT_PROCESS_RATES.keys()), key="hc_item_coat")
             with c2:
@@ -1532,11 +1523,17 @@ elif page == t["page_2_name"]:
                     t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key="hc_area_coat"
                 )
             with c4:
+                # FIX (ตามที่ขอ): เพิ่มช่องกรอกจำนวนชุด ให้ทำซ้ำได้หลายรอบ (เช่น เคลือบ 2 ชั้น)
+                hc_sets = st.number_input(
+                    "จำนวนชุด (Qty)" if lang == "TH" else "Sets (Qty)",
+                    min_value=1.0, value=1.0, step=1.0, key="hc_sets_coat"
+                )
+            with c5:
                 st.write(" "); st.write(" ")
                 if st.button(t["finish_add_btn"], use_container_width=True, key="add_hc_coat"):
                     st.session_state["selected_finishes"].append({
                         "type": f"Coating - {hc_item}", "rate": hc_rate, "cost_rate": None,
-                        "area": hc_area, "total": hc_rate * hc_area, "total_cost": None,
+                        "area": hc_area, "sets": hc_sets, "total": hc_rate * hc_area * hc_sets, "total_cost": None,
                     })
                     st.toast(f"Added {hc_item}")
 
@@ -1552,7 +1549,9 @@ elif page == t["page_2_name"]:
             if st.button(t["finish_add_btn"], key="add_hc_mold"):
                 st.session_state["selected_finishes"].append({
                     "type": f"Mold - {hc_item}", "rate": hc_rate, "cost_rate": None,
-                    "area": round(hc_qty * per_piece_area, 4), "total": hc_total, "total_cost": None,
+                    # หมายเหตุ: "จำนวนโมล (ชุด)" ของหมวดนี้ทำหน้าที่เป็น "จำนวนชุด" อยู่แล้ว
+                    # (คูณเข้าไปใน area/total ตั้งแต่ต้น) จึงเก็บ sets=hc_qty ไว้แสดงผลเฉยๆ
+                    "area": round(hc_qty * per_piece_area, 4), "sets": hc_qty, "total": hc_total, "total_cost": None,
                 })
                 st.toast(f"Added {hc_item}")
 
@@ -1579,7 +1578,9 @@ elif page == t["page_2_name"]:
                 if st.button(t["finish_add_btn"], use_container_width=True, key="add_hc_work"):
                     st.session_state["selected_finishes"].append({
                         "type": f"Work - {hc_item}", "rate": hc_rate, "cost_rate": None,
-                        "area": hc_qty, "total": hc_rate * hc_qty, "total_cost": None,
+                        # หมายเหตุ: หมวดนี้ hc_qty ทำหน้าที่เป็นทั้ง area/จำนวนชุดอยู่แล้วแล้วแต่
+                        # billing unit จึงเก็บ sets=hc_qty ไว้แสดงผลเฉยๆ ไม่คูณซ้ำ
+                        "area": hc_qty, "sets": hc_qty, "total": hc_rate * hc_qty, "total_cost": None,
                     })
                     st.toast(f"Added {hc_item}")
 
@@ -1613,7 +1614,7 @@ elif page == t["page_2_name"]:
                     )
 
         else:
-            c1, c2, c3, c4 = st.columns([2, 1.6, 1.3, 1])
+            c1, c2, c3, c4, c5 = st.columns([1.6, 1.5, 1.1, 1.1, 1])
             with c1:
                 hc_item = st.selectbox(t["finish_select"], list(COLOR_FINISH_DB.keys()), key="hc_item_color")
             hc_info = COLOR_FINISH_DB[hc_item]
@@ -1627,11 +1628,18 @@ elif page == t["page_2_name"]:
                     t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key="hc_area_color"
                 )
             with c4:
+                # FIX (ตามที่ขอ): เพิ่มช่องกรอกจำนวนชุด เช่นเดียวกับหมวด Coating
+                hc_sets = st.number_input(
+                    "จำนวนชุด (Qty)" if lang == "TH" else "Sets (Qty)",
+                    min_value=1.0, value=1.0, step=1.0, key="hc_sets_color"
+                )
+            with c5:
                 st.write(" "); st.write(" ")
                 if st.button(t["finish_add_btn"], use_container_width=True, key="add_hc_color"):
                     st.session_state["selected_finishes"].append({
                         "type": f"Color - {hc_item}", "rate": hc_rate, "cost_rate": hc_info["cost"],
-                        "area": hc_area, "total": hc_rate * hc_area, "total_cost": hc_info["cost"] * hc_area,
+                        "area": hc_area, "sets": hc_sets,
+                        "total": hc_rate * hc_area * hc_sets, "total_cost": hc_info["cost"] * hc_area * hc_sets,
                     })
                     st.toast(f"Added {hc_item}")
 
@@ -1641,22 +1649,24 @@ elif page == t["page_2_name"]:
         # FIX: แสดงผลแบบทีละแถวเพื่อใส่ปุ่มลบ (🗑️) ต่อแถว — เลือกงานเคลือบผิวผิด 1 รายการ
         # ลบเฉพาะแถวนั้นได้ ไม่ต้องกด "ล้างทั้งหมด" แล้วเลือกใหม่ทุกรายการ
         cost_col_label = "Total Cost (internal)" if lang == "EN" else "ต้นทุนภายใน (฿)"
-        finish_header_cols = st.columns([2.4, 1.1, 1.1, 1.2, 1.3, 0.6])
+        sets_col_label = "จำนวนชุด" if lang == "TH" else "Sets"
+        finish_header_cols = st.columns([2.1, 1.0, 0.9, 1.0, 1.1, 1.2, 0.6])
         for col, label in zip(
             finish_header_cols,
-            [t["finish_col_type"], t["finish_col_rate"], t["finish_col_area"], t["finish_col_total"], cost_col_label, ""]
+            [t["finish_col_type"], t["finish_col_rate"], sets_col_label, t["finish_col_area"], t["finish_col_total"], cost_col_label, ""]
         ):
             col.markdown(f"**{label}**")
 
         finish_to_delete = None
         for i, item in enumerate(st.session_state["selected_finishes"]):
-            row_cols = st.columns([2.4, 1.1, 1.1, 1.2, 1.3, 0.6])
+            row_cols = st.columns([2.1, 1.0, 0.9, 1.0, 1.1, 1.2, 0.6])
             row_cols[0].write(item["type"])
             row_cols[1].write(f"{item['rate']:,.2f}")
-            row_cols[2].write(f"{item['area']:,.4f}")
-            row_cols[3].write(f"{item['total']:,.2f}")
-            row_cols[4].write("—" if item.get("total_cost") is None else f"{item['total_cost']:,.2f}")
-            if row_cols[5].button("🗑️", key=f"del_finish_{i}", help="ลบแถวนี้" if lang == "TH" else "Delete this row"):
+            row_cols[2].write(f"{item.get('sets', 1):,.1f}")
+            row_cols[3].write(f"{item['area']:,.4f}")
+            row_cols[4].write(f"{item['total']:,.2f}")
+            row_cols[5].write("—" if item.get("total_cost") is None else f"{item['total_cost']:,.2f}")
+            if row_cols[6].button("🗑️", key=f"del_finish_{i}", help="ลบแถวนี้" if lang == "TH" else "Delete this row"):
                 finish_to_delete = i
 
         if finish_to_delete is not None:
