@@ -970,7 +970,6 @@ elif page == t["page_2_name"]:
         estimate_foam_cnc_hours,
         estimate_3d_print_hours,
         estimate_foam_blocks_needed,
-        DEFAULT_FOAM_BLOCK_FOOTPRINT_MM,
         DEFAULT_FOAM_MAX_SEGMENT_MM,
         DEFAULT_FOAM_WASTE_FACTOR,
     )
@@ -1265,7 +1264,7 @@ elif page == t["page_2_name"]:
         with st.expander("🧩 ภาพจำลองผังการตัดแบ่งบล็อกโฟม (Foam Slicing Visualizer)", expanded=True):
             col_v1, col_v2 = st.columns(2)
             with col_v1:
-                max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 0.5, 2.0, 1.0, 0.1, key="p2_max_seg")
+                max_seg_m = st.slider("ขนาดบล็อกโฟมสูงสุดต่อชิ้น (เมตร)", 1.0, 3.0, 1.0, 0.1, key="p2_max_seg")
             with col_v2:
                 wall_thick = st.slider("ความหนาเปลือกโฟม Hollow Shell (มม.)", 30, 150, 75, 5, key="p2_wall_thick")
 
@@ -1360,26 +1359,26 @@ elif page == t["page_2_name"]:
 
     total_blocks = 0.0
     per_piece_blocks = 0.0
+    is_multi_part = submesh_count > 1 and len(submeshes_for_blocks) > 1
+    single_part_calc = None  # เก็บ breakdown ไว้โชว์ caption เฉพาะกรณีโมเดลชิ้นเดียว
 
-    if submesh_count > 1 and len(submeshes_for_blocks) > 1:
+    if is_multi_part:
         per_part_blocks = []
         for sm in submeshes_for_blocks:
             ext = sm.extents
             calc = estimate_foam_blocks_needed(
-                width_mm=float(ext[0]), length_mm=float(ext[1]), height_mm=float(ext[2]),
-                max_segment_mm=current_max_segment_mm, block_footprint_mm=DEFAULT_FOAM_BLOCK_FOOTPRINT_MM,
-                waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
+                height_mm=float(ext[2]),
+                max_segment_mm=current_max_segment_mm, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
             )
             per_part_blocks.append(calc["blocks_needed"])
         per_piece_blocks = round(sum(per_part_blocks), 1)
         total_blocks = round(per_piece_blocks * production_qty, 1)
     elif x_mm > 0 and y_mm > 0 and z_mm > 0:
-        calc = estimate_foam_blocks_needed(
-            width_mm=x_mm, length_mm=y_mm, height_mm=z_mm,
-            max_segment_mm=current_max_segment_mm, block_footprint_mm=DEFAULT_FOAM_BLOCK_FOOTPRINT_MM,
-            waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
+        single_part_calc = estimate_foam_blocks_needed(
+            height_mm=z_mm,
+            max_segment_mm=current_max_segment_mm, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
         )
-        per_piece_blocks = calc["blocks_needed"]
+        per_piece_blocks = single_part_calc["blocks_needed"]
         total_blocks = round(per_piece_blocks * production_qty, 1)
 
     if x_mm > 0 and y_mm > 0 and z_mm > 0:
@@ -1399,6 +1398,30 @@ elif page == t["page_2_name"]:
             if lang == "TH" else
             f"Foam material required: {total_blocks:.1f} piece(s)"
         )
+        # FIX: เพิ่มคำอธิบายที่มาของตัวเลข ให้เห็นชัดว่าคำนวณจากค่า max_segment_mm (สไลเดอร์
+        # "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ในภาพ Visualizer ด้านบน) ตัวเดียวกัน — ถ้าตัวเลขดูไม่
+        # สมเหตุสมผล ให้ลองปรับสไลเดอร์นั้นแทน ไม่ใช่แก้ตรงนี้ เพราะตัวเลขนี้ผูกกับภาพเสมอ
+        seg_m = current_max_segment_mm / 1000.0
+        if single_part_calc is not None:
+            st.caption(
+                f"📐 คำนวณจากความสูง {z_mm:.0f} มม. ÷ สไลเดอร์ \"ขนาดบล็อกโฟมสูงสุดต่อชิ้น\" "
+                f"ด้านบน ({seg_m:.2f} ม./ก้อน) = {single_part_calc['layers_raw']:.2f} ก้อน — "
+                f"นับเส้นประในภาพด้านบนเทียบได้ (สมมติว่าหน้าตัดก้อนคลุมพื้นที่โมเดลได้พอดี) "
+                f"ถ้าตัวเลขดูมาก/น้อยเกินไป ลองปรับสไลเดอร์นั้นด้านบนแทน"
+                if lang == "TH" else
+                f"📐 Calculated from height {z_mm:.0f}mm ÷ the \"Max foam segment height\" slider "
+                f"above ({seg_m:.2f} m/block) = {single_part_calc['layers_raw']:.2f} blocks — "
+                f"matches the dashed lines above (assumes the block footprint fully covers the "
+                f"model). If this looks too high or low, adjust that slider instead."
+            )
+        else:
+            st.caption(
+                f"📐 โมเดลนี้แยก {len(submeshes_for_blocks)} ชิ้นส่วน คำนวณแยกทีละชิ้นแล้วรวมกัน "
+                f"โดยใช้ \"ขนาดบล็อกโฟมสูงสุดต่อชิ้น\" = {seg_m:.2f} ม./ชั้น ในทุกชิ้นส่วน"
+                if lang == "TH" else
+                f"📐 This model has {len(submeshes_for_blocks)} separate parts, calculated individually "
+                f"and summed, using \"Max foam segment height\" = {seg_m:.2f} m/layer for each part."
+            )
     else:
         st.info(
             "อัปโหลดไฟล์ 3D ที่หน้าแรกก่อน เพื่อคำนวณจำนวนก้อนโฟม"
@@ -1422,12 +1445,16 @@ elif page == t["page_2_name"]:
             materials_in_cat = list(MATERIAL_MASTER_DB[selected_cat].keys())
             selected_mat_item = st.selectbox(t["select_item"], materials_in_cat)
 
-            unit_price = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
-            unit_cost = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
+            # FIX (บั๊กราคาวัสดุ): เทียบกับใบประเมินจริงแล้วยืนยันว่า "Cost" ในชีทคือค่าที่
+            # ใช้คิดราคาวัสดุจริงกับลูกค้า (บวกเข้า Grand Total) ไม่ใช่ "Price" ตามที่โค้ดเดิม
+            # ใช้ผิด — ตอนนี้ billed_rate (สิ่งที่นำไปคูณ qty เป็น Total) ดึงจาก "cost" แทน
+            # ส่วน "price" ยังดึงมาโชว์ไว้อ้างอิงเฉยๆ (ยังไม่ทราบว่ามีไว้ใช้ทำอะไรจริงๆ)
+            billed_rate = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
+            sheet_price_ref = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
 
         with m_col3:
             mat_qty = st.number_input(t["mat_qty"], min_value=1.0, value=1.0, step=1.0)
-            st.caption(f"Price: ฿{unit_price:,.2f} | Cost: ฿{unit_cost:,.2f}")
+            st.caption(f"ราคา/หน่วย (Cost): ฿{billed_rate:,.2f}  |  Price อ้างอิงในชีท: ฿{sheet_price_ref:,.2f}")
 
         with m_col4:
             st.write(" ")
@@ -1437,10 +1464,10 @@ elif page == t["page_2_name"]:
                     "cat": selected_cat,
                     "name": selected_mat_item,
                     "qty": mat_qty,
-                    "unit_price": unit_price,
-                    "unit_cost": unit_cost,
-                    "total_price": unit_price * mat_qty,
-                    "total_cost": unit_cost * mat_qty
+                    "unit_price": billed_rate,
+                    "unit_cost": sheet_price_ref,
+                    "total_price": billed_rate * mat_qty,
+                    "total_cost": sheet_price_ref * mat_qty
                 }
                 st.session_state["selected_materials"].append(new_item)
                 st.toast(f"Added {selected_mat_item} x {mat_qty}")
@@ -1452,7 +1479,7 @@ elif page == t["page_2_name"]:
         mat_header_cols = st.columns([1.6, 2.2, 1.0, 1.2, 1.2, 0.6])
         for col, label in zip(
             mat_header_cols,
-            ["Category / หมวดหมู่", "Material / ชื่อวัสดุ", "Qty / จำนวน", "Unit Price / ราคา", "Total / ราคารวม", ""]
+            ["Category / หมวดหมู่", "Material / ชื่อวัสดุ", "Qty / จำนวน", "ราคา/หน่วย (Cost)", "Total / ราคารวม", ""]
         ):
             col.markdown(f"**{label}**")
 
