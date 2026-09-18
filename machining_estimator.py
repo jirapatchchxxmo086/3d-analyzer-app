@@ -5,20 +5,12 @@ machining_estimator.py
 พร้อมฟังก์ชันแนะนำจำนวนก้อนโฟมสำหรับผลิต (estimate_foam_blocks_needed)
 
 หมายเหตุการแก้ไข (สำคัญ):
-- estimate_foam_blocks_needed() ผ่านการปรับมาแล้ว 2 รอบ (หารปริมาตร -> container-fit หมุนอิสระ)
-  ทั้งสองรอบให้ตัวเลขคลาดเคลื่อนจากข้อมูลใบประเมินจริงมาก (รอบแรกต่ำเกินจริง, รอบสองสูงเกินจริง
-  ถึง 100-360% เทียบกับใบประเมินจริง 9 ตัวอย่าง) เวอร์ชันนี้ (รอบที่ 3) คำนวณด้วยหลักการ
-  "ตัดเป็นชั้นตามความสูง" ที่ตรงกับวิธีทำงานจริง:
-  1. ตัดโมเดลเป็นชั้นตามแนวสูง (Z) โดยความสูงต่อชั้นไม่เกิน max_segment_mm — ใช้ค่าเดียวกับ
-     สไลเดอร์ "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ใน Foam Slicing Visualizer ที่มีอยู่แล้วในหน้าเว็บ
-     (ไม่ใช่ค่าคงที่แยกต่างหากเหมือนก่อนหน้า) จำนวนชั้น = ceil(ความสูง / max_segment_mm)
-  2. แต่ละชั้น เช็คว่าหน้าตัด (กว้าง × ยาว) ต้องใช้ก้อนกี่ก้อน โดยก้อนมาตรฐานมีหน้าตัดเป็น
-     สี่เหลี่ยมจัตุรัส block_footprint_mm (ค่าเริ่มต้น 1220 มม. — ขนาดแผ่นโฟมมาตรฐาน 4 ฟุต)
-     จำนวนก้อนต่อชั้น = ceil(กว้าง / 1220) × ceil(ยาว / 1220)
-  3. รวมทั้งหมด = จำนวนชั้น × จำนวนก้อนต่อชั้น แล้วคูณ waste_factor
-  เทียบกับข้อมูลจริง (ใบประเมิน): โมเดล Mike3m (2700×370×3000มม.) คำนวณได้ตรงเป๊ะ (9.0 ก้อน
-  vs จริง 9.0) และโมเดล boo1.95m (1185×1055×1950มม.) ห่างจากจริงแค่ 11% (2.0 vs จริง 1.8)
-  ซึ่งแม่นยำกว่าวิธีก่อนหน้ามาก
+- estimate_foam_blocks_needed() ผ่านการปรับมาแล้วหลายรอบ (หารปริมาตร -> container-fit หมุน
+  อิสระ -> ตัดชั้น+คูณหน้าตัด) ทุกรอบก่อนหน้าให้ตัวเลขคลาดเคลื่อนจากข้อมูลจริงมาก เวอร์ชันนี้
+  (ล่าสุด) ตัดพารามิเตอร์ width_mm/length_mm ออกทั้งหมด ตามที่ผู้ใช้ยืนยันจากการเทียบภาพ
+  จำลอง Bounding Box จริงว่า "ก้อนโฟม 1 ก้อนคลุมหน้าตัดของโมเดลได้พอดีเสมอ" — ตัวกำหนด
+  จำนวนก้อนจริงๆ มีแค่ความสูงอย่างเดียว หารด้วย max_segment_mm (ค่าเดียวกับสไลเดอร์ Foam
+  Slicing Visualizer) เทียบกับข้อมูลจริง 3 ตัวอย่างแล้วตรงกันหมด (ดู docstring ของฟังก์ชัน)
 - estimate_foam_cnc_hours() ไม่คำนวณจำนวนก้อนโฟมซ้อนอยู่ข้างในอีกต่อไป (ก่อนหน้านี้มี
   logic คำนวณก้อนโฟมซ้ำอยู่ทั้งในฟังก์ชันนี้และใน estimate_foam_blocks_needed() ซึ่งให้
   ตัวเลขไม่ตรงกัน) — ให้ฟังก์ชันนี้โฟกัสแค่ชั่วโมงเครื่องจักร ส่วนจำนวนก้อนโฟมเรียก
@@ -62,9 +54,8 @@ FOAM_SLOPE_HR_PER_SQM = 2.20
 WALL_THICKNESS_MM = 1.2  # ความหนาผนังมาตรฐาน (ประมาณ 3 รอบหัวฉีด 0.4 มม.)
 
 # --- Foam Block defaults ---
-# หน้าตัดก้อนโฟมมาตรฐาน (จัตุรัส กว้าง=ยาว) — 1220 มม. คือขนาดแผ่นโฟมมาตรฐาน 4 ฟุตที่พบทั่วไป
-# ส่วนความสูงต่อชั้นใช้ max_segment_mm จาก Foam Slicing Visualizer แทน ไม่ใช่ค่าคงที่ตายตัว
-DEFAULT_FOAM_BLOCK_FOOTPRINT_MM = 1220.0
+# จำนวนก้อนโฟมคำนวณจาก "ความสูง ÷ max_segment_mm" เท่านั้น (สมมติว่าหน้าตัดก้อนคลุม
+# หน้าตัดโมเดลได้พอดีเสมอ) — max_segment_mm ใช้ค่าเดียวกับสไลเดอร์ Foam Slicing Visualizer
 DEFAULT_FOAM_MAX_SEGMENT_MM = 1000.0  # ค่าเริ่มต้นเดียวกับสไลเดอร์ Visualizer (1 เมตร)
 DEFAULT_FOAM_WASTE_FACTOR = 1.0
 
@@ -126,45 +117,36 @@ def estimate_foam_cnc_hours(
 
 
 def estimate_foam_blocks_needed(
-    width_mm: float,
-    length_mm: float,
     height_mm: float,
     max_segment_mm: float = DEFAULT_FOAM_MAX_SEGMENT_MM,
-    block_footprint_mm: float = DEFAULT_FOAM_BLOCK_FOOTPRINT_MM,
     waste_factor: float = DEFAULT_FOAM_WASTE_FACTOR,
 ) -> Dict[str, Any]:
     """
-    คำนวณจำนวนก้อนโฟมมาตรฐานที่ต้องใช้ ด้วยวิธี "ตัดเป็นชั้นตามความสูง" ให้ตรงกับวิธีการ
-    ผลิตจริง (ดูหมายเหตุการแก้ไขด้านบนของไฟล์สำหรับที่มาและการเทียบกับข้อมูลจริง):
+    คำนวณปริมาณวัตถุดิบโฟมที่ต้องใช้ (ตามที่ระบุจากผู้ใช้ — สมมติว่าหน้าตัดก้อนโฟม
+    1 ก้อนคลุมหน้าตัดของโมเดลได้พอดีเสมอ ตัวกำหนดจำนวนก้อนจริงๆ คือความสูงอย่างเดียว):
 
-    1. ตัดความสูง (height_mm ตามแนวแกน Z ของโมเดล) เป็นชั้นๆ ความสูงไม่เกิน max_segment_mm
-       ต่อชั้น (ค่าเดียวกับสไลเดอร์ Foam Slicing Visualizer ที่ผู้ใช้ปรับอยู่แล้วในหน้าเว็บ)
-       จำนวนชั้น = ceil(height_mm / max_segment_mm)
-    2. แต่ละชั้น เช็คว่าหน้าตัด (width_mm × length_mm) ต้องใช้ก้อนกี่ก้อน จากก้อนมาตรฐาน
-       หน้าตัดจัตุรัส block_footprint_mm × block_footprint_mm
-       จำนวนก้อนต่อชั้น = ceil(width_mm / block_footprint_mm) × ceil(length_mm / block_footprint_mm)
-    3. รวมทั้งหมด = จำนวนชั้น × จำนวนก้อนต่อชั้น คูณ waste_factor แล้วปัดทศนิยม 1 ตำแหน่ง
+    ปริมาณ = (height_mm ÷ max_segment_mm) × waste_factor แล้วปัดทศนิยม 1 ตำแหน่ง
+    max_segment_mm ใช้ค่าเดียวกับสไลเดอร์ "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ใน Foam Slicing
+    Visualizer ที่ผู้ใช้ปรับอยู่แล้วในหน้าเว็บ (ค่าเริ่มต้น 1000 มม. = 1 เมตร/ก้อน)
+
+    เทียบกับข้อมูลจริง 3 ตัวอย่าง:
+    - boo1.95m (สูง 1950มม.) -> 1.9 (จริง ~1.8)
+    - boo2.6m  (สูง 2600มม.) -> 2.6 (จริง ~2.5-3)
+    - Mike3m   (สูง 3000มม.) -> 3.0 (จริง ~3)
+    ตรงกันหมด ไม่ต้องคูณด้วยจำนวนก้อนต่อหน้าตัดอีกต่อไป (เวอร์ชันก่อนหน้าซึ่งคูณหน้าตัดด้วย
+    ให้ตัวเลขสูงเกินจริงหลายเท่า เช่น Mike3m เคยได้ 9-27 ก้อน ทั้งที่จริงใช้แค่ ~3 ก้อน)
     """
     height_mm = max(height_mm, 0.0)
-    width_mm = max(width_mm, 0.0)
-    length_mm = max(length_mm, 0.0)
 
-    vertical_layers = math.ceil(height_mm / max_segment_mm) if max_segment_mm > 0 and height_mm > 0 else (1 if height_mm > 0 else 0)
-    cross_w_units = math.ceil(width_mm / block_footprint_mm) if block_footprint_mm > 0 and width_mm > 0 else (1 if width_mm > 0 else 0)
-    cross_l_units = math.ceil(length_mm / block_footprint_mm) if block_footprint_mm > 0 and length_mm > 0 else (1 if length_mm > 0 else 0)
-
-    blocks_needed_raw = vertical_layers * cross_w_units * cross_l_units
-    blocks_needed = round(blocks_needed_raw * waste_factor, 1)
+    layers = (height_mm / max_segment_mm) if max_segment_mm > 0 else 0.0
+    blocks_needed = round(layers * waste_factor, 1)
 
     return {
-        "blocks_needed_raw": blocks_needed_raw,
+        "layers_raw": round(layers, 3),
         "waste_factor": waste_factor,
         "blocks_needed": blocks_needed,
-        "vertical_layers": vertical_layers,
-        "cross_section_units": (cross_w_units, cross_l_units),
         "max_segment_mm": max_segment_mm,
-        "block_footprint_mm": block_footprint_mm,
-        "note": "Layered container-fit estimate, calibrated against real estimate sheets",
+        "note": "Height-only estimate, calibrated against real estimate sheets",
     }
 
 
