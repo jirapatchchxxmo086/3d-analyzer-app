@@ -42,7 +42,7 @@ def align_mesh_optimal(mesh):
     
     return mesh_aligned, obb_transform
 
-def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, wall_thickness_mm=75.0, mesh=None, slice_mode="planar", custom_rotation=(0,0,0)):
+def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, mesh=None, slice_mode="planar", custom_rotation=(0,0,0)):
     fig = go.Figure()
 
     # กรณีโหมด Optimal (หมุนหาทิศทางประหยัดโฟม) หรือ Planar
