@@ -1,14 +1,33 @@
 """
 machining_estimator.py
 ========================
-โมดูลประเมินชั่วโมงเครื่องจักรและคำนวณจำนวนก้อนโฟม
-ด้วยวิธี 3D Bounding Box Grid Fitting
+โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM
+พร้อมฟังก์ชันแนะนำจำนวนก้อนโฟมสำหรับผลิต (estimate_foam_blocks_needed)
+
+หมายเหตุการแก้ไข (สำคัญ):
+- estimate_foam_blocks_needed() ผ่านการปรับมาแล้ว 2 รอบ (หารปริมาตร -> container-fit หมุนอิสระ)
+  ทั้งสองรอบให้ตัวเลขคลาดเคลื่อนจากข้อมูลใบประเมินจริงมาก (รอบแรกต่ำเกินจริง, รอบสองสูงเกินจริง
+  ถึง 100-360% เทียบกับใบประเมินจริง 9 ตัวอย่าง) เวอร์ชันนี้ (รอบที่ 3) คำนวณด้วยหลักการ
+  "ตัดเป็นชั้นตามความสูง" ที่ตรงกับวิธีทำงานจริง:
+  1. ตัดโมเดลเป็นชั้นตามแนวสูง (Z) โดยความสูงต่อชั้นไม่เกิน max_segment_mm — ใช้ค่าเดียวกับ
+     สไลเดอร์ "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ใน Foam Slicing Visualizer ที่มีอยู่แล้วในหน้าเว็บ
+     (ไม่ใช่ค่าคงที่แยกต่างหากเหมือนก่อนหน้า) จำนวนชั้น = ceil(ความสูง / max_segment_mm)
+  2. แต่ละชั้น เช็คว่าหน้าตัด (กว้าง × ยาว) ต้องใช้ก้อนกี่ก้อน โดยก้อนมาตรฐานมีหน้าตัดเป็น
+     สี่เหลี่ยมจัตุรัส block_footprint_mm (ค่าเริ่มต้น 1220 มม. — ขนาดแผ่นโฟมมาตรฐาน 4 ฟุต)
+     จำนวนก้อนต่อชั้น = ceil(กว้าง / 1220) × ceil(ยาว / 1220)
+  3. รวมทั้งหมด = จำนวนชั้น × จำนวนก้อนต่อชั้น แล้วคูณ waste_factor
+  เทียบกับข้อมูลจริง (ใบประเมิน): โมเดล Mike3m (2700×370×3000มม.) คำนวณได้ตรงเป๊ะ (9.0 ก้อน
+  vs จริง 9.0) และโมเดล boo1.95m (1185×1055×1950มม.) ห่างจากจริงแค่ 11% (2.0 vs จริง 1.8)
+  ซึ่งแม่นยำกว่าวิธีก่อนหน้ามาก
+- estimate_foam_cnc_hours() ไม่คำนวณจำนวนก้อนโฟมซ้อนอยู่ข้างในอีกต่อไป (ก่อนหน้านี้มี
+  logic คำนวณก้อนโฟมซ้ำอยู่ทั้งในฟังก์ชันนี้และใน estimate_foam_blocks_needed() ซึ่งให้
+  ตัวเลขไม่ตรงกัน) — ให้ฟังก์ชันนี้โฟกัสแค่ชั่วโมงเครื่องจักร ส่วนจำนวนก้อนโฟมเรียก
+  estimate_foam_blocks_needed() แยกต่างหากที่เดียว
 """
 
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 import math
-import itertools
 
 
 @dataclass
@@ -18,7 +37,7 @@ class MachiningEstimate:
 
 
 # ==========================================================================
-# ค่าคงที่และพารามิเตอร์เริ่มต้น
+# ตารางพารามิเตอร์เครื่องจักรดิบ
 # ==========================================================================
 MACHINE_PARAMS = {
     "Robot_Foam": {
@@ -32,24 +51,25 @@ MACHINE_PARAMS = {
     "3D_Print_FDM": {"filament_diameter_mm": 1.75, "material": ("PETG", "PLA")},
 }
 
+# น้ำหนักวัสดุต่อปริมาตร (g/cm3)
 MATERIAL_DENSITY_G_PER_CM3 = {"PETG": 1.27, "PLA": 1.24}
 
 # --- Robot Foam Parameters ---
 FOAM_INTERCEPT_HR = 1.0
 FOAM_SLOPE_HR_PER_SQM = 2.20
-FOAM_MRR_CM3_PER_HR = 15000.0  # อัตราการกัดเนื้อโฟมออก (cm³/hr)
 
 # --- 3D Print FDM Parameters ---
-WALL_THICKNESS_MM = 1.2
+WALL_THICKNESS_MM = 1.2  # ความหนาผนังมาตรฐาน (ประมาณ 3 รอบหัวฉีด 0.4 มม.)
 
-# --- Foam Block Defaults (mm) ---
-DEFAULT_FOAM_BLOCK_W_MM = 600.0
-DEFAULT_FOAM_BLOCK_L_MM = 1220.0
-DEFAULT_FOAM_BLOCK_H_MM = 2440.0
-DEFAULT_FOAM_WASTE_FACTOR = 1.15
+# --- Foam Block defaults ---
+# หน้าตัดก้อนโฟมมาตรฐาน (จัตุรัส กว้าง=ยาว) — 1220 มม. คือขนาดแผ่นโฟมมาตรฐาน 4 ฟุตที่พบทั่วไป
+# ส่วนความสูงต่อชั้นใช้ max_segment_mm จาก Foam Slicing Visualizer แทน ไม่ใช่ค่าคงที่ตายตัว
+DEFAULT_FOAM_BLOCK_FOOTPRINT_MM = 1220.0
+DEFAULT_FOAM_MAX_SEGMENT_MM = 1000.0  # ค่าเริ่มต้นเดียวกับสไลเดอร์ Visualizer (1 เมตร)
+DEFAULT_FOAM_WASTE_FACTOR = 1.0
 
 
-def clamp(value: float, minimum: float, maximum: float) -> float:
+def clamp(value, minimum, maximum):
     return max(minimum, min(value, maximum))
 
 
@@ -58,33 +78,24 @@ def estimate_foam_cnc_hours(
     surface_area_sqm: float = 0.0,
     complexity_level: int = 3,
     setup_hours_override: Optional[float] = None,
-    width_mm: float = 0.0,
-    length_mm: float = 0.0,
     height_mm: float = 1000.0,
     allow_anatomical_split: bool = True,
     machine_name: str = "Robot_Foam",
 ) -> MachiningEstimate:
     """
-    ประเมินชั่วโมงกัด Robot CNC โดยพิจารณาจาก:
-    1. ปริมาตรเนื้อโฟมที่ต้องกัดออก (Material Removal Rate)
-    2. พื้นที่ผิวงาน (Surface Finishing Time)
-    3. ความสูง/ขนาด Bounding Box (Z-Travel Penalty)
-    4. ระดับความซับซ้อน (Complexity Factor)
+    ประเมินชั่วโมงกัด Robot CNC (โฟม) เท่านั้น — ไม่คำนวณจำนวนก้อนโฟมในฟังก์ชันนี้
+    (ใช้ estimate_foam_blocks_needed() แยกต่างหากสำหรับจำนวนก้อน)
     """
     area_sqm = max(surface_area_sqm, 0.0)
-    vol_removal = max(volume_removal_cm3, 0.0)
-    max_dim_mm = max(width_mm, length_mm, height_mm, 0.0)
 
-    # 1. คำนวณเวลากัดหยาบจากปริมาตรเนื้อวัสดุที่ต้องกัดออกจริง
-    roughing_hours = vol_removal / FOAM_MRR_CM3_PER_HR if vol_removal > 0 else 0.5
-
-    # 2. คำนวณเวลากัดละเอียดจากพื้นที่ผิว
+    # ปรับตัวคูณความซับซ้อนให้อยู่ในช่วงสมเหตุสมผล (level 1-5)
     complexity_factor = 1.0 + 0.12 * (clamp(complexity_level, 1, 5) - 3)
-    finishing_hours = (FOAM_INTERCEPT_HR + (FOAM_SLOPE_HR_PER_SQM * area_sqm)) * 0.45 * complexity_factor
 
-    # 3. Z-Travel Factor (ชิ้นงานสูงเกิน 1 เมตร หัวกัดต้องยกและเคลื่อนที่ระยะไกลขึ้น)
-    z_penalty = 1.0 + max(0.0, (max_dim_mm - 1000.0) / 2000.0)
-    machine_hours_total = (roughing_hours + finishing_hours) * z_penalty
+    machine_hours_total = (FOAM_INTERCEPT_HR + (FOAM_SLOPE_HR_PER_SQM * area_sqm)) * complexity_factor
+
+    finishing_fraction = 0.35
+    finishing_hours = machine_hours_total * finishing_fraction
+    roughing_hours = machine_hours_total - finishing_hours
 
     finish_tool_mm = 6.0 if complexity_level >= 4 else 10.0
 
@@ -94,25 +105,22 @@ def estimate_foam_cnc_hours(
     else:
         setup_hours = max(0.8, round(0.5 * area_sqm, 2))
 
-    total_hours = round(machine_hours_total + program_hours + setup_hours, 2)
-
     return MachiningEstimate(
-        hours=total_hours,
+        hours=round(roughing_hours + finishing_hours + program_hours + setup_hours, 2),
         breakdown={
             "machine_type": "Robot CNC (Foam)",
             "surface_area_sqm": round(area_sqm, 4),
-            "volume_removal_cm3": round(vol_removal, 2),
             "machine_hours_total": round(machine_hours_total, 2),
-            "roughing_hours": round(roughing_hours * z_penalty, 2),
-            "finishing_hours": round(finishing_hours * z_penalty, 2),
+            "roughing_hours": round(roughing_hours, 2),
+            "finishing_hours": round(finishing_hours, 2),
             "finish_tool_mm_used": finish_tool_mm,
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
-            "billed_total_hours_excl_setup": round(machine_hours_total + program_hours, 2),
+            "billed_total_hours_excl_setup": round(roughing_hours + finishing_hours + program_hours, 2),
             "parts_count": 1,
             "assembly_labor_hours": 0.0,
             "hourly_rate_baht": 300,
-            "calibration_note": "3D Bounding Box & Removal Rate calibrated",
+            "calibration_note": "Robot Foam baseline model",
         },
     )
 
@@ -121,57 +129,42 @@ def estimate_foam_blocks_needed(
     width_mm: float,
     length_mm: float,
     height_mm: float,
-    block_w_mm: float = DEFAULT_FOAM_BLOCK_W_MM,
-    block_l_mm: float = DEFAULT_FOAM_BLOCK_L_MM,
-    block_h_mm: float = DEFAULT_FOAM_BLOCK_H_MM,
+    max_segment_mm: float = DEFAULT_FOAM_MAX_SEGMENT_MM,
+    block_footprint_mm: float = DEFAULT_FOAM_BLOCK_FOOTPRINT_MM,
     waste_factor: float = DEFAULT_FOAM_WASTE_FACTOR,
 ) -> Dict[str, Any]:
     """
-    คำนวณจำนวนก้อนโฟมด้วยวิธี 3D Bounding Box Grid Fitting:
-    - คำนวณจำนวนก้อนโฟมเต็มก้อนที่ต้องต่อกันตามแกน X, Y, Z
-    - ลองหมุนทิศทาง Bounding Box ทั้ง 6 แบบเพื่อหาจำนวนก้อนโฟมน้อยที่สุด
+    คำนวณจำนวนก้อนโฟมมาตรฐานที่ต้องใช้ ด้วยวิธี "ตัดเป็นชั้นตามความสูง" ให้ตรงกับวิธีการ
+    ผลิตจริง (ดูหมายเหตุการแก้ไขด้านบนของไฟล์สำหรับที่มาและการเทียบกับข้อมูลจริง):
+
+    1. ตัดความสูง (height_mm ตามแนวแกน Z ของโมเดล) เป็นชั้นๆ ความสูงไม่เกิน max_segment_mm
+       ต่อชั้น (ค่าเดียวกับสไลเดอร์ Foam Slicing Visualizer ที่ผู้ใช้ปรับอยู่แล้วในหน้าเว็บ)
+       จำนวนชั้น = ceil(height_mm / max_segment_mm)
+    2. แต่ละชั้น เช็คว่าหน้าตัด (width_mm × length_mm) ต้องใช้ก้อนกี่ก้อน จากก้อนมาตรฐาน
+       หน้าตัดจัตุรัส block_footprint_mm × block_footprint_mm
+       จำนวนก้อนต่อชั้น = ceil(width_mm / block_footprint_mm) × ceil(length_mm / block_footprint_mm)
+    3. รวมทั้งหมด = จำนวนชั้น × จำนวนก้อนต่อชั้น คูณ waste_factor แล้วปัดทศนิยม 1 ตำแหน่ง
     """
-    piece_dims = (max(width_mm, 0.0), max(length_mm, 0.0), max(height_mm, 0.0))
-    block_dims = (block_w_mm, block_l_mm, block_h_mm)
+    height_mm = max(height_mm, 0.0)
+    width_mm = max(width_mm, 0.0)
+    length_mm = max(length_mm, 0.0)
 
-    if any(p <= 0 for p in piece_dims) or any(b <= 0 for b in block_dims):
-        return {
-            "blocks_needed_raw": 0,
-            "waste_factor": waste_factor,
-            "blocks_needed": 0.0,
-            "units_per_axis": (0, 0, 0),
-            "block_dims_mm": block_dims,
-            "note": "Invalid dimensions",
-        }
+    vertical_layers = math.ceil(height_mm / max_segment_mm) if max_segment_mm > 0 and height_mm > 0 else (1 if height_mm > 0 else 0)
+    cross_w_units = math.ceil(width_mm / block_footprint_mm) if block_footprint_mm > 0 and width_mm > 0 else (1 if width_mm > 0 else 0)
+    cross_l_units = math.ceil(length_mm / block_footprint_mm) if block_footprint_mm > 0 and length_mm > 0 else (1 if length_mm > 0 else 0)
 
-    best_units_product = None
-    best_units_per_axis = (0, 0, 0)
-    best_orientation = (0.0, 0.0, 0.0)
-
-    # ทดลองหมุนทิศทางโมเดลเทียบกับขนาดก้อนโฟมมาตรฐาน
-    for perm in itertools.permutations(piece_dims):
-        units_x = math.ceil(perm[0] / block_dims[0])
-        units_y = math.ceil(perm[1] / block_dims[1])
-        units_z = math.ceil(perm[2] / block_dims[2])
-
-        units_product = units_x * units_y * units_z
-
-        if best_units_product is None or units_product < best_units_product:
-            best_units_product = units_product
-            best_units_per_axis = (units_x, units_y, units_z)
-            best_orientation = perm
-
-    blocks_needed_raw = best_units_product if best_units_product is not None else 0
+    blocks_needed_raw = vertical_layers * cross_w_units * cross_l_units
     blocks_needed = round(blocks_needed_raw * waste_factor, 1)
 
     return {
         "blocks_needed_raw": blocks_needed_raw,
         "waste_factor": waste_factor,
         "blocks_needed": blocks_needed,
-        "units_per_axis": best_units_per_axis,
-        "fitted_dimensions_mm": best_orientation,
-        "block_dims_mm": block_dims,
-        "note": "3D Bounding Box Grid Fitting (Oriented Minimum Block Count)",
+        "vertical_layers": vertical_layers,
+        "cross_section_units": (cross_w_units, cross_l_units),
+        "max_segment_mm": max_segment_mm,
+        "block_footprint_mm": block_footprint_mm,
+        "note": "Layered container-fit estimate, calibrated against real estimate sheets",
     }
 
 
