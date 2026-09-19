@@ -970,8 +970,6 @@ elif page == t["page_2_name"]:
         estimate_foam_cnc_hours,
         estimate_3d_print_hours,
         estimate_foam_blocks_needed,
-        DEFAULT_FOAM_MAX_SEGMENT_MM,
-        DEFAULT_FOAM_WASTE_FACTOR,
     )
 
     # FIX: these were previously called with no caching, so every single widget
@@ -1319,23 +1317,17 @@ elif page == t["page_2_name"]:
     # ==========================================
     # 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)
     # ==========================================
-    # ใช้สูตร height-only: จำนวนก้อน = ความสูง ÷ max_segment_mm (สมมติว่าหน้าตัดก้อนคลุม
-    # พื้นที่โมเดลได้พอดีเสมอ ตามที่ยืนยันจากการเทียบภาพจำลองจริง) — ใช้ max_segment_mm
-    # เดียวกับสไลเดอร์ visualizer ด้านบน (ไม่ต้องตั้งซ้ำ)
-    # ไม่มี UI ให้ตั้งค่าขนาดก้อน/waste factor แยก (ตามที่ขอ) — ใช้ค่า default คงที่
-    # ภายใน แสดงผลแค่ตัวเลขแนะนำทศนิยม 1 ตำแหน่ง เหมือนตัวอย่าง "1.8 ก้อน"
+    # ใช้สูตร "พื้นที่ผิว" (surface_area_sqm) — fit จากใบประเมินจริง 6 ตัวอย่าง ครอบคลุม
+    # ตั้งแต่โมเดลเล็ก (Boo ~1.95m) ถึงใหญ่มาก (Sully 8m) R²=0.98 (ดูรายละเอียดสูตรและ
+    # เหตุผลที่พื้นที่ผิวแม่นกว่า bounding box ใน machining_estimator.py) — ไม่ใช้
+    # bounding box / max_segment_mm ในการคำนวณตัวเลขนี้อีกต่อไป (สไลเดอร์ "ขนาดบล็อกโฟม
+    # สูงสุดต่อชิ้น" ด้านบนยังมีผลแค่กับภาพจำลองการตัดชั้นเท่านั้น)
     #
-    # ถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) คำนวณแยกทีละชิ้นแล้วรวมยอด แทนที่จะใช้
-    # bbox รวมทั้งโมเดล ซึ่งจะเผื่อพื้นที่ว่างระหว่างชิ้นส่วนเกินจริง — ถ้า get_submeshes()
-    # ใช้งานไม่ได้ (เช่น trimesh/networkx เวอร์ชันไม่เข้ากัน) จะ fallback ไปใช้ bbox รวม
-    # แทน ไม่ทำให้ทั้งหน้าพัง
+    # ถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) รวมพื้นที่ผิวของแต่ละชิ้นส่วนจริง (sm.area)
+    # แทนพื้นที่ผิวรวมทั้งโมเดล — ถ้า get_submeshes() ใช้งานไม่ได้ (เช่น trimesh/networkx
+    # เวอร์ชันไม่เข้ากัน) จะ fallback ไปใช้พื้นที่ผิวรวมทั้งโมเดลแทน ไม่ทำให้ทั้งหน้าพัง
     st.markdown("---")
     st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
-
-    # ตามที่ขอ: ใช้ max_segment_mm ค่าเดียวกับสไลเดอร์ "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ใน Foam
-    # Slicing Visualizer ด้านบน (ไม่ใช่ค่าคงที่แยก) — เทียบกับข้อมูลใบประเมินจริงแล้วแม่นยำ
-    # กว่าวิธีก่อนหน้ามาก (ดูรายละเอียดใน machining_estimator.py)
-    current_max_segment_mm = float(st.session_state.get("p2_max_seg", 1.0)) * 1000.0
 
     submeshes_for_blocks = []
     submesh_split_failed = False
@@ -1345,42 +1337,33 @@ elif page == t["page_2_name"]:
         except Exception:
             # FIX: get_submeshes() (mesh.split() ผ่าน trimesh -> networkx) เคยพังทั้งหน้า
             # เพราะไม่มีการดักจับ error เลย ตอนนี้ถ้าแยกชิ้นส่วนไม่สำเร็จ จะ fallback ไปคำนวณ
-            # จาก bounding box รวมทั้งโมเดลแทน แล้วแจ้งเตือนผู้ใช้เฉยๆ ไม่ทำให้แอป error
+            # จากพื้นที่ผิวรวมทั้งโมเดลแทน แล้วแจ้งเตือนผู้ใช้เฉยๆ ไม่ทำให้แอป error
             submesh_split_failed = True
 
     total_blocks = 0.0
     per_piece_blocks = 0.0
     is_multi_part = submesh_count > 1 and len(submeshes_for_blocks) > 1
-    single_part_calc = None  # เก็บ breakdown ไว้โชว์ caption เฉพาะกรณีโมเดลชิ้นเดียว
+    used_surface_area_sqm = per_piece_area  # ค่าเริ่มต้น (ใช้เมื่อไม่ใช่ multi-part)
 
     if is_multi_part:
-        per_part_blocks = []
-        for sm in submeshes_for_blocks:
-            ext = sm.extents
-            calc = estimate_foam_blocks_needed(
-                height_mm=float(ext[2]),
-                max_segment_mm=current_max_segment_mm, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
-            )
-            per_part_blocks.append(calc["blocks_needed"])
+        per_part_sqm = [float(sm.area) / 1_000_000.0 for sm in submeshes_for_blocks]
+        used_surface_area_sqm = sum(per_part_sqm)
+        per_part_blocks = [estimate_foam_blocks_needed(sqm)["blocks_needed"] for sqm in per_part_sqm]
         per_piece_blocks = round(sum(per_part_blocks), 1)
         total_blocks = round(per_piece_blocks * production_qty, 1)
-    elif x_mm > 0 and y_mm > 0 and z_mm > 0:
-        single_part_calc = estimate_foam_blocks_needed(
-            height_mm=z_mm,
-            max_segment_mm=current_max_segment_mm, waste_factor=DEFAULT_FOAM_WASTE_FACTOR,
-        )
-        per_piece_blocks = single_part_calc["blocks_needed"]
+    elif per_piece_area > 0:
+        calc = estimate_foam_blocks_needed(per_piece_area)
+        per_piece_blocks = calc["blocks_needed"]
         total_blocks = round(per_piece_blocks * production_qty, 1)
 
-    if x_mm > 0 and y_mm > 0 and z_mm > 0:
+    if per_piece_area > 0:
         if submesh_split_failed:
             st.caption(
-                "⚠️ แยกชิ้นส่วนโมเดลอัตโนมัติไม่สำเร็จ ตัวเลขด้านล่างคำนวณจาก Bounding Box "
-                "รวมทั้งโมเดลแทน (อาจเผื่อเนื้อโฟมเกินจริงเล็กน้อยถ้าโมเดลมีหลายชิ้นแยกห่างกัน)"
+                "⚠️ แยกชิ้นส่วนโมเดลอัตโนมัติไม่สำเร็จ ตัวเลขด้านล่างคำนวณจากพื้นที่ผิวรวม"
+                "ทั้งโมเดลแทน"
                 if lang == "TH" else
                 "⚠️ Automatic part-splitting failed — the number below is calculated from the "
-                "whole-model bounding box instead (may slightly overestimate for models with "
-                "widely separated parts)."
+                "whole-model surface area instead."
             )
         # ตามที่ขอ: โชว์แค่ตัวเลขเดียว "ปริมาณวัตถุดิบโฟมที่ต้องใช้ X ชิ้น" ไม่ต้องแยก
         # ยอดรวม/เฉลี่ยต่อชิ้นให้ซับซ้อน — total_blocks คือยอดรวมทั้ง production_qty แล้ว
@@ -1389,30 +1372,17 @@ elif page == t["page_2_name"]:
             if lang == "TH" else
             f"Foam material required: {total_blocks:.1f} piece(s)"
         )
-        # FIX: เพิ่มคำอธิบายที่มาของตัวเลข ให้เห็นชัดว่าคำนวณจากค่า max_segment_mm (สไลเดอร์
-        # "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ในภาพ Visualizer ด้านบน) ตัวเดียวกัน — ถ้าตัวเลขดูไม่
-        # สมเหตุสมผล ให้ลองปรับสไลเดอร์นั้นแทน ไม่ใช่แก้ตรงนี้ เพราะตัวเลขนี้ผูกกับภาพเสมอ
-        seg_m = current_max_segment_mm / 1000.0
-        if single_part_calc is not None:
-            st.caption(
-                f"📐 คำนวณจากความสูง {z_mm:.0f} มม. ÷ สไลเดอร์ \"ขนาดบล็อกโฟมสูงสุดต่อชิ้น\" "
-                f"ด้านบน ({seg_m:.2f} ม./ก้อน) = {single_part_calc['layers_raw']:.2f} ก้อน — "
-                f"นับเส้นประในภาพด้านบนเทียบได้ (สมมติว่าหน้าตัดก้อนคลุมพื้นที่โมเดลได้พอดี) "
-                f"ถ้าตัวเลขดูมาก/น้อยเกินไป ลองปรับสไลเดอร์นั้นด้านบนแทน"
-                if lang == "TH" else
-                f"📐 Calculated from height {z_mm:.0f}mm ÷ the \"Max foam segment height\" slider "
-                f"above ({seg_m:.2f} m/block) = {single_part_calc['layers_raw']:.2f} blocks — "
-                f"matches the dashed lines above (assumes the block footprint fully covers the "
-                f"model). If this looks too high or low, adjust that slider instead."
-            )
-        else:
-            st.caption(
-                f"📐 โมเดลนี้แยก {len(submeshes_for_blocks)} ชิ้นส่วน คำนวณแยกทีละชิ้นแล้วรวมกัน "
-                f"โดยใช้ \"ขนาดบล็อกโฟมสูงสุดต่อชิ้น\" = {seg_m:.2f} ม./ชั้น ในทุกชิ้นส่วน"
-                if lang == "TH" else
-                f"📐 This model has {len(submeshes_for_blocks)} separate parts, calculated individually "
-                f"and summed, using \"Max foam segment height\" = {seg_m:.2f} m/layer for each part."
-            )
+        # FIX: เพิ่มคำอธิบายที่มาของตัวเลข ให้เห็นชัดว่าคำนวณจากพื้นที่ผิว ไม่ใช่ bounding
+        # box/สไลเดอร์อีกต่อไป — กันความสับสนจากเวอร์ชันก่อนหน้า
+        st.caption(
+            f"📐 คำนวณจากพื้นที่ผิวโมเดล {used_surface_area_sqm:.2f} ตร.ม. "
+            f"({len(submeshes_for_blocks)} ชิ้นส่วนรวมกัน)" if is_multi_part else
+            f"📐 คำนวณจากพื้นที่ผิวโมเดล {used_surface_area_sqm:.2f} ตร.ม."
+            if lang == "TH" else
+            (f"📐 Calculated from combined surface area of {len(submeshes_for_blocks)} parts "
+             f"= {used_surface_area_sqm:.2f} sq.m." if is_multi_part else
+             f"📐 Calculated from model surface area = {used_surface_area_sqm:.2f} sq.m.")
+        )
     else:
         st.info(
             "อัปโหลดไฟล์ 3D ที่หน้าแรกก่อน เพื่อคำนวณจำนวนก้อนโฟม"
