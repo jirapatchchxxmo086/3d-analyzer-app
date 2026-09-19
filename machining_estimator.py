@@ -6,11 +6,24 @@ machining_estimator.py
 
 หมายเหตุการแก้ไข (สำคัญ):
 - estimate_foam_blocks_needed() ผ่านการปรับมาแล้วหลายรอบ (หารปริมาตร -> container-fit หมุน
-  อิสระ -> ตัดชั้น+คูณหน้าตัด) ทุกรอบก่อนหน้าให้ตัวเลขคลาดเคลื่อนจากข้อมูลจริงมาก เวอร์ชันนี้
-  (ล่าสุด) ตัดพารามิเตอร์ width_mm/length_mm ออกทั้งหมด ตามที่ผู้ใช้ยืนยันจากการเทียบภาพ
-  จำลอง Bounding Box จริงว่า "ก้อนโฟม 1 ก้อนคลุมหน้าตัดของโมเดลได้พอดีเสมอ" — ตัวกำหนด
-  จำนวนก้อนจริงๆ มีแค่ความสูงอย่างเดียว หารด้วย max_segment_mm (ค่าเดียวกับสไลเดอร์ Foam
-  Slicing Visualizer) เทียบกับข้อมูลจริง 3 ตัวอย่างแล้วตรงกันหมด (ดู docstring ของฟังก์ชัน)
+  อิสระ -> ตัดชั้น+คูณหน้าตัด -> ตัดชั้นอย่างเดียว) ทุกรอบก่อนหน้าใช้ได้กับโมเดลขนาดเล็ก-กลาง
+  (สูงไม่เกิน ~2 เมตร) แต่พังหนักกับโมเดลใหญ่ (คลาดเคลื่อนหลักร้อย% เทียบกับใบประเมินจริง)
+  เวอร์ชันนี้ (ล่าสุด) เปลี่ยนมาใช้ "พื้นที่ผิว" (surface_area_sqm) แทน bounding box ทั้งหมด
+  โดยตรงจากการเทียบข้อมูลใบประเมินจริง 6 ตัวอย่าง (Boo1.95m/2.6m, Mike3m/4m, Sully6m/8m):
+
+      Foam Qty = FOAM_QTY_K × (พื้นที่ผิว ตร.ม.) ^ FOAM_QTY_EXPONENT
+
+  fit ด้วย log-log regression ได้ K=0.3188, exponent=1.0627, R²=0.98 (error 0-33% ต่อจุด
+  เทียบกับก่อนหน้าที่คลาดเคลื่อนถึงหลักร้อย-พัน% สำหรับโมเดลใหญ่)
+
+  เหตุผลที่พื้นที่ผิวสัมพันธ์กับปริมาณโฟมมากกว่าปริมาตร/bounding box: จากใบประเมินจริง
+  โมเดลขนาดใหญ่ (เช่น Sully) มีรายการ "เหล็กกล่อง"/"เหล็กแผ่น" เป็นวัตถุดิบหลักร่วมด้วย —
+  แปลว่าใช้ "โครงเหล็กเป็นแกน แล้วหุ้มผิวด้วยโฟม" ไม่ใช่ก้อนโฟมตันเต็มทั้งก้อน ปริมาณโฟม
+  จึงแปรผันตามพื้นที่ผิวที่ต้องหุ้ม ไม่ใช่ปริมาตรหรือหน้าตัดของ bounding box
+
+  ผลคือ estimate_foam_blocks_needed() ไม่รับ width_mm/length_mm/height_mm/max_segment_mm
+  อีกต่อไป — รับแค่ surface_area_sqm อย่างเดียว ส่วน max_segment_mm (สไลเดอร์ Foam Slicing
+  Visualizer) ยังมีผลแค่กับภาพจำลองการตัดชั้น ไม่มีผลกับตัวเลขนี้แล้ว
 - estimate_foam_cnc_hours() ไม่คำนวณจำนวนก้อนโฟมซ้อนอยู่ข้างในอีกต่อไป (ก่อนหน้านี้มี
   logic คำนวณก้อนโฟมซ้ำอยู่ทั้งในฟังก์ชันนี้และใน estimate_foam_blocks_needed() ซึ่งให้
   ตัวเลขไม่ตรงกัน) — ให้ฟังก์ชันนี้โฟกัสแค่ชั่วโมงเครื่องจักร ส่วนจำนวนก้อนโฟมเรียก
@@ -54,10 +67,14 @@ FOAM_SLOPE_HR_PER_SQM = 2.20
 WALL_THICKNESS_MM = 1.2  # ความหนาผนังมาตรฐาน (ประมาณ 3 รอบหัวฉีด 0.4 มม.)
 
 # --- Foam Block defaults ---
-# จำนวนก้อนโฟมคำนวณจาก "ความสูง ÷ max_segment_mm" เท่านั้น (สมมติว่าหน้าตัดก้อนคลุม
-# หน้าตัดโมเดลได้พอดีเสมอ) — max_segment_mm ใช้ค่าเดียวกับสไลเดอร์ Foam Slicing Visualizer
-DEFAULT_FOAM_MAX_SEGMENT_MM = 1000.0  # ค่าเริ่มต้นเดียวกับสไลเดอร์ Visualizer (1 เมตร)
-DEFAULT_FOAM_WASTE_FACTOR = 1.0
+# จำนวนก้อนโฟมคำนวณจากพื้นที่ผิว (ตร.ม.) — ค่า K/exponent fit จากใบประเมินจริง 6 ตัวอย่าง
+# (ดูหมายเหตุด้านบน) — R²=0.98
+FOAM_QTY_K = 0.3188
+FOAM_QTY_EXPONENT = 1.0627
+
+# max_segment_mm ยังใช้เป็นค่า default ของสไลเดอร์ "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ใน Foam
+# Slicing Visualizer สำหรับภาพจำลองการตัดชั้นเท่านั้น ไม่มีผลกับ Foam Qty อีกต่อไป
+DEFAULT_FOAM_MAX_SEGMENT_MM = 1000.0
 
 
 def clamp(value, minimum, maximum):
@@ -117,36 +134,39 @@ def estimate_foam_cnc_hours(
 
 
 def estimate_foam_blocks_needed(
-    height_mm: float,
-    max_segment_mm: float = DEFAULT_FOAM_MAX_SEGMENT_MM,
-    waste_factor: float = DEFAULT_FOAM_WASTE_FACTOR,
+    surface_area_sqm: float,
 ) -> Dict[str, Any]:
     """
-    คำนวณปริมาณวัตถุดิบโฟมที่ต้องใช้ (ตามที่ระบุจากผู้ใช้ — สมมติว่าหน้าตัดก้อนโฟม
-    1 ก้อนคลุมหน้าตัดของโมเดลได้พอดีเสมอ ตัวกำหนดจำนวนก้อนจริงๆ คือความสูงอย่างเดียว):
+    คำนวณปริมาณวัตถุดิบโฟมที่ต้องใช้ จากพื้นที่ผิวของโมเดล (ตร.ม.) — fit จากใบประเมิน
+    จริง 6 ตัวอย่าง (Boo1.95m/2.6m, Mike3m/4m, Sully6m/8m) ครอบคลุมตั้งแต่โมเดลเล็กไปจน
+    ถึงใหญ่มาก (พื้นที่ผิว 5-168 ตร.ม.):
 
-    ปริมาณ = (height_mm ÷ max_segment_mm) × waste_factor แล้วปัดทศนิยม 1 ตำแหน่ง
-    max_segment_mm ใช้ค่าเดียวกับสไลเดอร์ "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ใน Foam Slicing
-    Visualizer ที่ผู้ใช้ปรับอยู่แล้วในหน้าเว็บ (ค่าเริ่มต้น 1000 มม. = 1 เมตร/ก้อน)
+        Foam Qty = FOAM_QTY_K × (surface_area_sqm) ^ FOAM_QTY_EXPONENT
 
-    เทียบกับข้อมูลจริง 3 ตัวอย่าง:
-    - boo1.95m (สูง 1950มม.) -> 1.9 (จริง ~1.8)
-    - boo2.6m  (สูง 2600มม.) -> 2.6 (จริง ~2.5-3)
-    - Mike3m   (สูง 3000มม.) -> 3.0 (จริง ~3)
-    ตรงกันหมด ไม่ต้องคูณด้วยจำนวนก้อนต่อหน้าตัดอีกต่อไป (เวอร์ชันก่อนหน้าซึ่งคูณหน้าตัดด้วย
-    ให้ตัวเลขสูงเกินจริงหลายเท่า เช่น Mike3m เคยได้ 9-27 ก้อน ทั้งที่จริงใช้แค่ ~3 ก้อน)
+    เทียบกับข้อมูลจริง (R²=0.98, error 0-33% ต่อจุด):
+    - boo1.95m (5.1 ตร.ม.)  -> 1.8  (จริง 1.8)
+    - boo2.6m  (9.1 ตร.ม.)  -> 3.3  (จริง 2.5)
+    - mike3m   (17.5 ตร.ม.) -> 6.7  (จริง 9.0)
+    - mike4m   (30.5 ตร.ม.) -> 12.0 (จริง 14.0)
+    - sully6m  (94.5 ตร.ม.) -> 40.1 (จริง 34.0)
+    - sully8m  (168 ตร.ม.)  -> 73.8 (จริง 74.0)
+
+    แม่นยำกว่าทุกสูตรก่อนหน้ามาก (bounding-box/container-fit เคยคลาดเคลื่อนหลักร้อย-พัน%
+    สำหรับโมเดลใหญ่ — ดูหมายเหตุด้านบนของไฟล์)
     """
-    height_mm = max(height_mm, 0.0)
+    surface_area_sqm = max(surface_area_sqm, 0.0)
 
-    layers = (height_mm / max_segment_mm) if max_segment_mm > 0 else 0.0
-    blocks_needed = round(layers * waste_factor, 1)
+    if surface_area_sqm <= 0:
+        blocks_needed = 0.0
+    else:
+        blocks_needed = round(FOAM_QTY_K * (surface_area_sqm ** FOAM_QTY_EXPONENT), 1)
 
     return {
-        "layers_raw": round(layers, 3),
-        "waste_factor": waste_factor,
+        "surface_area_sqm": round(surface_area_sqm, 3),
         "blocks_needed": blocks_needed,
-        "max_segment_mm": max_segment_mm,
-        "note": "Height-only estimate, calibrated against real estimate sheets",
+        "formula_k": FOAM_QTY_K,
+        "formula_exponent": FOAM_QTY_EXPONENT,
+        "note": "Surface-area power-law estimate, calibrated against 6 real estimate sheets (R2=0.98)",
     }
 
 
