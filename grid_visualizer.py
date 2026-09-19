@@ -42,7 +42,7 @@ def align_mesh_optimal(mesh):
     
     return mesh_aligned, obb_transform
 
-def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, mesh=None, slice_mode="planar", custom_rotation=(0,0,0)):
+def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, mesh=None, slice_mode="planar", custom_rotation=(0,0,0), grid_offset_x_mm=0.0, grid_offset_y_mm=0.0):
     fig = go.Figure()
 
     # กรณีโหมด Optimal (หมุนหาทิศทางประหยัดโฟม) หรือ Planar
@@ -122,11 +122,16 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, mesh=No
         # FIX (ตามที่ขอ): เพิ่มกริดอ้างอิงขนาดหน้าตัดก้อนโฟมมาตรฐาน 600×1200 มม.
         # (600=กว้าง/แกน X, 1200=ยาว/แกน Y) ให้เห็นภาพว่าหน้าตัดของชิ้นงานเทียบกับขนาด
         # แผ่นโฟมมาตรฐานแล้วกว้าง/ยาวกี่แผ่น — เส้นแนวตั้งคั่นทุกระยะ X=600mm
+        #
+        # จุดเริ่มกริด (grid_offset_x_mm / grid_offset_y_mm) ปรับได้ ไม่ต้องเริ่มที่ขอบ
+        # ชิ้นงานเสมอไป (0-599mm สำหรับแกน X, 0-1199mm สำหรับแกน Y) เพื่อให้ลองขยับหา
+        # ตำแหน่งวางกริดที่เหลือเศษน้อยที่สุดได้ด้วยตา — เป็นแค่เส้นอ้างอิงสำหรับวางแผนตัด
+        # จริง ไม่ได้มีผลกับตัวเลข "ปริมาณวัตถุดิบโฟมที่ต้องใช้" ซึ่งคำนวณจากพื้นที่ผิวแทน
         total_width = bx1 - bx0
-        num_x_lines = math.floor(total_width / FOAM_GRID_WIDTH_MM) if FOAM_GRID_WIDTH_MM > 0 else 0
-        for s in range(1, num_x_lines + 1):
-            x_plane = bx0 + s * FOAM_GRID_WIDTH_MM
-            if x_plane < bx1:
+        x_start = bx0 + (grid_offset_x_mm % FOAM_GRID_WIDTH_MM if FOAM_GRID_WIDTH_MM > 0 else 0.0)
+        x_plane = x_start
+        while x_plane < bx1:
+            if x_plane > bx0:
                 fig.add_trace(go.Scatter3d(
                     x=[x_plane, x_plane, x_plane, x_plane, x_plane],
                     y=[by0, by1, by1, by0, by0],
@@ -135,13 +140,14 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, mesh=No
                     line=dict(color='#F59E0B', width=2, dash='dot'),
                     name=f'กริดโฟม X={x_plane:.0f}mm', showlegend=False
                 ))
+            x_plane += FOAM_GRID_WIDTH_MM
 
-        # เส้นแนวตั้งคั่นทุกระยะ Y=1200mm
+        # เส้นแนวตั้งคั่นทุกระยะ Y=1200mm (เริ่มจาก grid_offset_y_mm เช่นกัน)
         total_length = by1 - by0
-        num_y_lines = math.floor(total_length / FOAM_GRID_LENGTH_MM) if FOAM_GRID_LENGTH_MM > 0 else 0
-        for s in range(1, num_y_lines + 1):
-            y_plane = by0 + s * FOAM_GRID_LENGTH_MM
-            if y_plane < by1:
+        y_start = by0 + (grid_offset_y_mm % FOAM_GRID_LENGTH_MM if FOAM_GRID_LENGTH_MM > 0 else 0.0)
+        y_plane = y_start
+        while y_plane < by1:
+            if y_plane > by0:
                 fig.add_trace(go.Scatter3d(
                     x=[bx0, bx1, bx1, bx0, bx0],
                     y=[y_plane, y_plane, y_plane, y_plane, y_plane],
@@ -150,6 +156,7 @@ def create_foam_grid_visualizer(x_mm, y_mm, z_mm, max_segment_mm=1000.0, mesh=No
                     line=dict(color='#10B981', width=2, dash='dot'),
                     name=f'กริดโฟม Y={y_plane:.0f}mm', showlegend=False
                 ))
+            y_plane += FOAM_GRID_LENGTH_MM
 
     else:
         # โหมด Modular สไลซ์ก้อนย่อย
