@@ -1269,43 +1269,8 @@ elif page == t["page_2_name"]:
                 slice_mode=current_slice_mode
             )
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
-
-            # (D) แผนการตัดแบ่งจริง — นับจำนวนก้อนตามกริด 600×1200mm ที่เห็นในภาพด้านบน
-            # เป็นตาราง ไม่ใช่แค่เส้นอ้างอิง โดยคำนวณแบบ full-resolution (ไม่ thinning
-            # เหมือนเส้นที่วาดในภาพ เพราะตรงนี้ต้องการตัวเลขจริงสำหรับวางแผนตัด ไม่ใช่แค่ดูตา)
-            #
-            # หมายเหตุสำคัญ: ตัวเลขนี้คนละความหมายกับ "ปริมาณวัตถุดิบโฟมที่ต้องใช้" ด้านล่าง —
-            # ตรงนี้คือ "ถ้าตัดเต็มตาม Bounding Box จริงๆ ต้องใช้กี่ก้อน" (สมมติว่าตันเต็ม
-            # ไม่รู้ว่าโมเดลกลวง/มีโครงเหล็กแกนใน) จึงมักได้ตัวเลข "สูงกว่า" ปริมาณวัตถุดิบ
-            # จริงที่ระบบแนะนำ ซึ่งอิงจากพื้นที่ผิว (คำนึงถึงโครงสร้างจริงแล้ว)
-            max_segment_mm_plan = max_seg_m * 1000.0
-            n_layers = math.ceil(z_mm / max_segment_mm_plan) if max_segment_mm_plan > 0 else 1
-            n_cols = math.ceil(x_mm / FOAM_GRID_WIDTH_MM) if FOAM_GRID_WIDTH_MM > 0 else 1
-            n_rows = math.ceil(y_mm / FOAM_GRID_LENGTH_MM) if FOAM_GRID_LENGTH_MM > 0 else 1
-            blocks_per_layer = n_cols * n_rows
-            total_tiling_blocks = n_layers * blocks_per_layer
-
-            st.markdown("###### 📋 แผนการตัดแบ่งจริง (อิงกริดในภาพด้านบน)")
-            plan_rows = []
-            for layer_i in range(n_layers):
-                z_start = layer_i * max_segment_mm_plan
-                z_end = min((layer_i + 1) * max_segment_mm_plan, z_mm)
-                plan_rows.append({
-                    "ชั้นที่": layer_i + 1,
-                    "ช่วงความสูง (Z, มม.)": f"{z_start:.0f}–{z_end:.0f}",
-                    "จำนวนก้อน/ชั้น": f"{n_cols}×{n_rows} = {blocks_per_layer} ก้อน",
-                })
-            st.dataframe(pd.DataFrame(plan_rows), use_container_width=True, hide_index=True)
-            st.caption(
-                f"รวมทั้งหมด (ตามการตัดเต็มกริด): **{total_tiling_blocks} ก้อน** — นี่คือแผน "
-                f"ตัดตามรูปทรงกล่องล้วนๆ (ขอบบนสุดของจำนวนก้อนที่อาจต้องใช้ถ้าตัดเต็มพื้นที่ "
-                f"ไม่ใช่ตัวเลขต้นทุนวัสดุจริง) — สำหรับปริมาณวัตถุดิบที่ควรสั่งซื้อจริง ดูที่ "
-                f"หัวข้อ \"ปริมาณวัตถุดิบโฟมที่ต้องใช้\" ด้านล่างแทน"
-                if lang == "TH" else
-                f"Total (full-grid tiling): **{total_tiling_blocks} blocks** — this is an "
-                f"upper-bound plan based on the bounding box alone (not actual material cost). "
-                f"For the real material quantity to order, see \"Foam material required\" below."
-            )
+            # หมายเหตุ: เดิมมีตาราง "แผนการตัดแบ่งจริง" (นับจำนวนก้อนตามกริด) อยู่ใต้ภาพนี้
+            # ตัดออกตามที่ขอ — เหลือแค่ภาพจำลอง/กริดอ้างอิงไว้ดูเฉยๆ ไม่มีตัวเลขสรุปด้านล่าง
 
         st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
@@ -1357,52 +1322,29 @@ elif page == t["page_2_name"]:
     # ==========================================
     # ใช้สูตร "พื้นที่ผิว" (surface_area_sqm) — fit จากใบประเมินจริง 8 ตัวอย่าง ครอบคลุม
     # ตั้งแต่โมเดลเล็ก (Apple Jack/Twilight ~0.9m) ถึงใหญ่มาก (Sully 8m) R²=0.988 (ดูรายละเอียด
-    # สูตรและเหตุผลที่พื้นที่ผิวแม่นกว่า bounding box ใน machining_estimator.py) — ไม่ใช้
-    # bounding box / max_segment_mm ในการคำนวณตัวเลขนี้อีกต่อไป (สไลเดอร์ "ขนาดบล็อกโฟม
-    # สูงสุดต่อชิ้น" ด้านบนยังมีผลแค่กับภาพจำลองการตัดชั้นเท่านั้น)
+    # สูตรและเหตุผลที่พื้นที่ผิวแม่นกว่า bounding box ใน machining_estimator.py)
     #
-    # ถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) รวมพื้นที่ผิวของแต่ละชิ้นส่วนจริง (sm.area)
-    # แทนพื้นที่ผิวรวมทั้งโมเดล — ถ้า get_submeshes() ใช้งานไม่ได้ (เช่น trimesh/networkx
-    # เวอร์ชันไม่เข้ากัน) จะ fallback ไปใช้พื้นที่ผิวรวมทั้งโมเดลแทน ไม่ทำให้ทั้งหน้าพัง
+    # FIX (สำคัญ): เดิมถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) จะรวมพื้นที่ผิวของแต่ละ
+    # ชิ้นส่วนแยกกัน (sm.area ของแต่ละชิ้นบวกกัน) ซึ่ง "นับพื้นที่ผิวเกินจริง" มาก เพราะรอยตัด
+    # ระหว่างชิ้นส่วน (เช่น รอยต่อแขนกับลำตัว) แต่เดิมเป็นพื้นผิวที่ซ่อนอยู่ข้างในโมเดล (ไม่นับ
+    # เป็นพื้นที่ผิวภายนอก) แต่พอแยกเป็นคนละชิ้น รอยตัดนั้นกลายเป็น "ผิวนอก" ของแต่ละชิ้นทันที
+    # ยิ่งโมเดลแยกหลายชิ้นเท่าไหร่ ยิ่งนับซ้ำเกินจริงมากขึ้นเรื่อยๆ (เคยทำให้ Sully8m ที่จริง
+    # พื้นที่ผิว 168 ตร.ม. กลายเป็น 227+ ตร.ม. จนคำนวณได้ 112.7 ก้อน ทั้งที่จริงใช้แค่ ~74 ก้อน)
+    # ตอนนี้ใช้พื้นที่ผิวรวมทั้งโมเดล (per_piece_area จากหน้า 1 มี trimesh คำนวณให้ตรงอยู่แล้ว)
+    # เสมอ ไม่ว่าโมเดลจะแยกกี่ชิ้นส่วนก็ตาม — ตรงกับพื้นที่ผิวที่ใบประเมินจริงใช้ (นับทั้งตัว)
     st.markdown("---")
     st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
 
-    submeshes_for_blocks = []
-    submesh_split_failed = False
-    if submesh_count > 1 and current_mesh is not None:
-        try:
-            submeshes_for_blocks = get_submeshes(current_mesh)
-        except Exception:
-            # FIX: get_submeshes() (mesh.split() ผ่าน trimesh -> networkx) เคยพังทั้งหน้า
-            # เพราะไม่มีการดักจับ error เลย ตอนนี้ถ้าแยกชิ้นส่วนไม่สำเร็จ จะ fallback ไปคำนวณ
-            # จากพื้นที่ผิวรวมทั้งโมเดลแทน แล้วแจ้งเตือนผู้ใช้เฉยๆ ไม่ทำให้แอป error
-            submesh_split_failed = True
-
     total_blocks = 0.0
     per_piece_blocks = 0.0
-    is_multi_part = submesh_count > 1 and len(submeshes_for_blocks) > 1
-    used_surface_area_sqm = per_piece_area  # ค่าเริ่มต้น (ใช้เมื่อไม่ใช่ multi-part)
+    used_surface_area_sqm = per_piece_area
 
-    if is_multi_part:
-        per_part_sqm = [float(sm.area) / 1_000_000.0 for sm in submeshes_for_blocks]
-        used_surface_area_sqm = sum(per_part_sqm)
-        per_part_blocks = [estimate_foam_blocks_needed(sqm)["blocks_needed"] for sqm in per_part_sqm]
-        per_piece_blocks = round(sum(per_part_blocks), 1)
-        total_blocks = round(per_piece_blocks * production_qty, 1)
-    elif per_piece_area > 0:
+    if per_piece_area > 0:
         calc = estimate_foam_blocks_needed(per_piece_area)
         per_piece_blocks = calc["blocks_needed"]
         total_blocks = round(per_piece_blocks * production_qty, 1)
 
     if per_piece_area > 0:
-        if submesh_split_failed:
-            st.caption(
-                "⚠️ แยกชิ้นส่วนโมเดลอัตโนมัติไม่สำเร็จ ตัวเลขด้านล่างคำนวณจากพื้นที่ผิวรวม"
-                "ทั้งโมเดลแทน"
-                if lang == "TH" else
-                "⚠️ Automatic part-splitting failed — the number below is calculated from the "
-                "whole-model surface area instead."
-            )
         # ตามที่ขอ: โชว์แค่ตัวเลขเดียว "ปริมาณวัตถุดิบโฟมที่ต้องใช้ X ชิ้น" ไม่ต้องแยก
         # ยอดรวม/เฉลี่ยต่อชิ้นให้ซับซ้อน — total_blocks คือยอดรวมทั้ง production_qty แล้ว
         st.info(
@@ -1410,16 +1352,12 @@ elif page == t["page_2_name"]:
             if lang == "TH" else
             f"Foam material required: {total_blocks:.1f} piece(s)"
         )
-        # FIX: เพิ่มคำอธิบายที่มาของตัวเลข ให้เห็นชัดว่าคำนวณจากพื้นที่ผิว ไม่ใช่ bounding
-        # box/สไลเดอร์อีกต่อไป — กันความสับสนจากเวอร์ชันก่อนหน้า
+        # FIX: เพิ่มคำอธิบายที่มาของตัวเลข ให้เห็นชัดว่าคำนวณจากพื้นที่ผิวรวมทั้งโมเดล
+        # (ไม่ใช่ผลรวมของแต่ละชิ้นส่วนแยกกันอีกต่อไป — ดูหมายเหตุ FIX ด้านบน)
         st.caption(
-            f"📐 คำนวณจากพื้นที่ผิวโมเดล {used_surface_area_sqm:.2f} ตร.ม. "
-            f"({len(submeshes_for_blocks)} ชิ้นส่วนรวมกัน)" if is_multi_part else
             f"📐 คำนวณจากพื้นที่ผิวโมเดล {used_surface_area_sqm:.2f} ตร.ม."
             if lang == "TH" else
-            (f"📐 Calculated from combined surface area of {len(submeshes_for_blocks)} parts "
-             f"= {used_surface_area_sqm:.2f} sq.m." if is_multi_part else
-             f"📐 Calculated from model surface area = {used_surface_area_sqm:.2f} sq.m.")
+            f"📐 Calculated from model surface area = {used_surface_area_sqm:.2f} sq.m."
         )
         # FIX (ตามที่ขอ): เตือนช่วงความแม่นยำสำหรับงานใหญ่ (สูงเกิน 2 เมตร) ให้เห็นชัดว่า
         # ตัวเลขนี้ fit จากข้อมูลจริง 8 ตัวอย่าง (error -31% ถึง +23% ต่อจุด) — งานใหญ่ควร
