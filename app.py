@@ -4,11 +4,12 @@ import numpy as np
 import tempfile
 import os
 import base64
+import math
 import pandas as pd
 from string import Template
 import streamlit.components.v1 as components
 import auth
-from grid_visualizer import create_foam_grid_visualizer, get_submeshes
+from grid_visualizer import create_foam_grid_visualizer, get_submeshes, FOAM_GRID_WIDTH_MM, FOAM_GRID_LENGTH_MM
 
 auth.require_login()
 
@@ -1269,6 +1270,43 @@ elif page == t["page_2_name"]:
             )
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
 
+            # (D) แผนการตัดแบ่งจริง — นับจำนวนก้อนตามกริด 600×1200mm ที่เห็นในภาพด้านบน
+            # เป็นตาราง ไม่ใช่แค่เส้นอ้างอิง โดยคำนวณแบบ full-resolution (ไม่ thinning
+            # เหมือนเส้นที่วาดในภาพ เพราะตรงนี้ต้องการตัวเลขจริงสำหรับวางแผนตัด ไม่ใช่แค่ดูตา)
+            #
+            # หมายเหตุสำคัญ: ตัวเลขนี้คนละความหมายกับ "ปริมาณวัตถุดิบโฟมที่ต้องใช้" ด้านล่าง —
+            # ตรงนี้คือ "ถ้าตัดเต็มตาม Bounding Box จริงๆ ต้องใช้กี่ก้อน" (สมมติว่าตันเต็ม
+            # ไม่รู้ว่าโมเดลกลวง/มีโครงเหล็กแกนใน) จึงมักได้ตัวเลข "สูงกว่า" ปริมาณวัตถุดิบ
+            # จริงที่ระบบแนะนำ ซึ่งอิงจากพื้นที่ผิว (คำนึงถึงโครงสร้างจริงแล้ว)
+            max_segment_mm_plan = max_seg_m * 1000.0
+            n_layers = math.ceil(z_mm / max_segment_mm_plan) if max_segment_mm_plan > 0 else 1
+            n_cols = math.ceil(x_mm / FOAM_GRID_WIDTH_MM) if FOAM_GRID_WIDTH_MM > 0 else 1
+            n_rows = math.ceil(y_mm / FOAM_GRID_LENGTH_MM) if FOAM_GRID_LENGTH_MM > 0 else 1
+            blocks_per_layer = n_cols * n_rows
+            total_tiling_blocks = n_layers * blocks_per_layer
+
+            st.markdown("###### 📋 แผนการตัดแบ่งจริง (อิงกริดในภาพด้านบน)")
+            plan_rows = []
+            for layer_i in range(n_layers):
+                z_start = layer_i * max_segment_mm_plan
+                z_end = min((layer_i + 1) * max_segment_mm_plan, z_mm)
+                plan_rows.append({
+                    "ชั้นที่": layer_i + 1,
+                    "ช่วงความสูง (Z, มม.)": f"{z_start:.0f}–{z_end:.0f}",
+                    "จำนวนก้อน/ชั้น": f"{n_cols}×{n_rows} = {blocks_per_layer} ก้อน",
+                })
+            st.dataframe(pd.DataFrame(plan_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                f"รวมทั้งหมด (ตามการตัดเต็มกริด): **{total_tiling_blocks} ก้อน** — นี่คือแผน "
+                f"ตัดตามรูปทรงกล่องล้วนๆ (ขอบบนสุดของจำนวนก้อนที่อาจต้องใช้ถ้าตัดเต็มพื้นที่ "
+                f"ไม่ใช่ตัวเลขต้นทุนวัสดุจริง) — สำหรับปริมาณวัตถุดิบที่ควรสั่งซื้อจริง ดูที่ "
+                f"หัวข้อ \"ปริมาณวัตถุดิบโฟมที่ต้องใช้\" ด้านล่างแทน"
+                if lang == "TH" else
+                f"Total (full-grid tiling): **{total_tiling_blocks} blocks** — this is an "
+                f"upper-bound plan based on the bounding box alone (not actual material cost). "
+                f"For the real material quantity to order, see \"Foam material required\" below."
+            )
+
         st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
         col_rec1, col_rec2 = st.columns([2, 1])
@@ -1317,9 +1355,9 @@ elif page == t["page_2_name"]:
     # ==========================================
     # 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)
     # ==========================================
-    # ใช้สูตร "พื้นที่ผิว" (surface_area_sqm) — fit จากใบประเมินจริง 6 ตัวอย่าง ครอบคลุม
-    # ตั้งแต่โมเดลเล็ก (Boo ~1.95m) ถึงใหญ่มาก (Sully 8m) R²=0.98 (ดูรายละเอียดสูตรและ
-    # เหตุผลที่พื้นที่ผิวแม่นกว่า bounding box ใน machining_estimator.py) — ไม่ใช้
+    # ใช้สูตร "พื้นที่ผิว" (surface_area_sqm) — fit จากใบประเมินจริง 8 ตัวอย่าง ครอบคลุม
+    # ตั้งแต่โมเดลเล็ก (Apple Jack/Twilight ~0.9m) ถึงใหญ่มาก (Sully 8m) R²=0.988 (ดูรายละเอียด
+    # สูตรและเหตุผลที่พื้นที่ผิวแม่นกว่า bounding box ใน machining_estimator.py) — ไม่ใช้
     # bounding box / max_segment_mm ในการคำนวณตัวเลขนี้อีกต่อไป (สไลเดอร์ "ขนาดบล็อกโฟม
     # สูงสุดต่อชิ้น" ด้านบนยังมีผลแค่กับภาพจำลองการตัดชั้นเท่านั้น)
     #
@@ -1383,6 +1421,19 @@ elif page == t["page_2_name"]:
              f"= {used_surface_area_sqm:.2f} sq.m." if is_multi_part else
              f"📐 Calculated from model surface area = {used_surface_area_sqm:.2f} sq.m.")
         )
+        # FIX (ตามที่ขอ): เตือนช่วงความแม่นยำสำหรับงานใหญ่ (สูงเกิน 2 เมตร) ให้เห็นชัดว่า
+        # ตัวเลขนี้ fit จากข้อมูลจริง 8 ตัวอย่าง (error -31% ถึง +23% ต่อจุด) — งานใหญ่ควร
+        # ตรวจทานเพิ่มก่อนสั่งซื้อจริง ไม่ควรใช้เป็นตัวเลขสุดท้ายแบบเป๊ะๆ ทันที
+        if z_mm > 2000:
+            st.caption(
+                "⚠️ งานขนาดใหญ่ (สูงเกิน 2 เมตร) ตัวเลขนี้อ้างอิงจากข้อมูลใบประเมินจริงที่มี "
+                "อยู่ตอนนี้เพียง 8 ตัวอย่าง ยังคลาดเคลื่อนได้ประมาณ -31% ถึง +23% ต่อชิ้นงาน — "
+                "แนะนำให้ผู้มีประสบการณ์ตรวจทานอีกครั้งก่อนสั่งซื้อวัสดุจริง"
+                if lang == "TH" else
+                "⚠️ For large jobs (height over 2m), this estimate is calibrated from only 8 "
+                "real reference quotes and can be off by roughly -31% to +23% per job — please "
+                "have someone experienced double-check before ordering material."
+            )
     else:
         st.info(
             "อัปโหลดไฟล์ 3D ที่หน้าแรกก่อน เพื่อคำนวณจำนวนก้อนโฟม"
