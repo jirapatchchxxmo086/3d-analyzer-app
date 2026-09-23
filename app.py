@@ -653,7 +653,7 @@ nav_options = [t["page_1_name"], t["page_2_name"]]
 if "nav_page_choice" not in st.session_state or st.session_state["nav_page_choice"] not in nav_options:
     st.session_state["nav_page_choice"] = nav_options[0]
 
-page = st.sidebar.radio("", nav_options, key="nav_page_choice")
+page = st.sidebar.radio(t["sidebar_menu"], nav_options, key="nav_page_choice", label_visibility="collapsed")
 
 st.sidebar.divider()
 
