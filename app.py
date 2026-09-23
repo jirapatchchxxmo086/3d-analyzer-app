@@ -680,6 +680,22 @@ if page == t["page_1_name"]:
     file_unit_to_mm = UNIT_TO_MM["mm"]
 
     if uploaded_file is not None:
+        # FIX: เพิ่มเช็คขนาดไฟล์ขั้นต่ำ กันไฟล์เปล่า/เสีย (0 KB หรือใกล้ 0) ที่จะทำให้
+        # trimesh.load() พังตอนอ่าน vertices ไม่ได้ โดยไม่มีข้อความ error ที่เข้าใจง่าย
+        # ตั้งไว้ต่ำมาก (1 KB) เพื่อกันเฉพาะไฟล์ที่ชัดเจนว่าเสีย/ว่างเปล่า ไม่ได้ตั้งใจกัน
+        # ไฟล์ 3D เล็กที่ถูกต้อง (ไฟล์ STL/OBJ ที่มีรูปทรงจริงมักมีขนาดมากกว่านี้อยู่แล้ว)
+        MIN_FILE_SIZE_KB = 1.0
+        file_size_kb_check = uploaded_file.size / 1024.0
+        if file_size_kb_check < MIN_FILE_SIZE_KB:
+            st.error(
+                f"⚠️ ไฟล์เล็กเกินไป ({file_size_kb_check:.3f} KB) — น่าจะเป็นไฟล์ว่างเปล่า"
+                f"หรือไฟล์เสีย กรุณาตรวจสอบไฟล์ต้นฉบับแล้วลองอัปโหลดใหม่"
+                if lang == "TH" else
+                f"⚠️ File too small ({file_size_kb_check:.3f} KB) — likely an empty or "
+                f"corrupted file. Please check the source file and try uploading again."
+            )
+            st.stop()
+
         file_extension = os.path.splitext(uploaded_file.name)[1].lower()
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
