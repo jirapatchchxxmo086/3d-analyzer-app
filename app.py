@@ -4,11 +4,12 @@ import numpy as np
 import tempfile
 import os
 import base64
+import math
 import pandas as pd
 from string import Template
 import streamlit.components.v1 as components
 import auth
-from grid_visualizer import create_foam_grid_visualizer, get_submeshes
+from grid_visualizer import create_foam_grid_visualizer, get_submeshes, FOAM_GRID_WIDTH_MM, FOAM_GRID_LENGTH_MM
 
 auth.require_login()
 
@@ -652,7 +653,7 @@ nav_options = [t["page_1_name"], t["page_2_name"]]
 if "nav_page_choice" not in st.session_state or st.session_state["nav_page_choice"] not in nav_options:
     st.session_state["nav_page_choice"] = nav_options[0]
 
-page = st.sidebar.radio("", nav_options, key="nav_page_choice")
+page = st.sidebar.radio(t["sidebar_menu"], nav_options, key="nav_page_choice", label_visibility="collapsed")
 
 st.sidebar.divider()
 
@@ -679,6 +680,22 @@ if page == t["page_1_name"]:
     file_unit_to_mm = UNIT_TO_MM["mm"]
 
     if uploaded_file is not None:
+        # FIX: เพิ่มเช็คขนาดไฟล์ขั้นต่ำ กันไฟล์เปล่า/เสีย (0 KB หรือใกล้ 0) ที่จะทำให้
+        # trimesh.load() พังตอนอ่าน vertices ไม่ได้ โดยไม่มีข้อความ error ที่เข้าใจง่าย
+        # ตั้งไว้ต่ำมาก (1 KB) เพื่อกันเฉพาะไฟล์ที่ชัดเจนว่าเสีย/ว่างเปล่า ไม่ได้ตั้งใจกัน
+        # ไฟล์ 3D เล็กที่ถูกต้อง (ไฟล์ STL/OBJ ที่มีรูปทรงจริงมักมีขนาดมากกว่านี้อยู่แล้ว)
+        MIN_FILE_SIZE_KB = 1.0
+        file_size_kb_check = uploaded_file.size / 1024.0
+        if file_size_kb_check < MIN_FILE_SIZE_KB:
+            st.error(
+                f"⚠️ ไฟล์เล็กเกินไป ({file_size_kb_check:.3f} KB) — น่าจะเป็นไฟล์ว่างเปล่า"
+                f"หรือไฟล์เสีย กรุณาตรวจสอบไฟล์ต้นฉบับแล้วลองอัปโหลดใหม่"
+                if lang == "TH" else
+                f"⚠️ File too small ({file_size_kb_check:.3f} KB) — likely an empty or "
+                f"corrupted file. Please check the source file and try uploading again."
+            )
+            st.stop()
+
         file_extension = os.path.splitext(uploaded_file.name)[1].lower()
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
@@ -772,6 +789,8 @@ if page == t["page_1_name"]:
                 used_convex_hull = False
                 used_bbox_estimate = False
 
+                used_voxel_estimate = False
+
                 if is_point_cloud:
                     hull = final_mesh.convex_hull
                     surface_area_m2 = hull.area / 1_000_000.0
@@ -783,7 +802,49 @@ if page == t["page_1_name"]:
 
                     if is_watertight:
                         volume_m3 = final_mesh.volume / 1_000_000_000.0
-                    else:
+
+                    # FIX (ลำดับความสำคัญใหม่): เดิมลอง Convex Hull ก่อนเสมอ แล้วค่อยลองซ่อม
+                    # (fill_holes) ทีหลัง — แต่ fill_holes จะไม่ถูกเรียกเลยถ้า Convex Hull
+                    # สำเร็จไปแล้ว (volume_m3 > 0) ทั้งที่ Convex Hull มักประเมินปริมาตรสูง
+                    # เกินจริงมาก (ไม่รู้จักส่วนเว้า/ร่อง/โพรง) ตอนนี้เรียงลำดับใหม่ให้ลอง
+                    # วิธีที่แม่นกว่าก่อนเสมอ: ซ่อมให้ปิดสนิท -> Voxelization -> Convex Hull
+                    # -> เดาคร่าวจาก Bounding Box (เดิมเป็นขั้นตอนสุดท้ายอยู่แล้ว)
+
+                    # 1) ลองซ่อมให้ปิดสนิทก่อน (เพิ่มขั้นตอนซ่อมให้ครบกว่าเดิม ซึ่งเคยมีแค่
+                    # fill_holes อย่างเดียว) ถ้าซ่อมสำเร็จ จะได้ปริมาตรที่แม่นยำที่สุด
+                    if volume_m3 <= 0:
+                        try:
+                            repaired = final_mesh.copy()
+                            repaired.merge_vertices()
+                            repaired.remove_duplicate_faces()
+                            repaired.fix_normals()
+                            trimesh.repair.fill_holes(repaired)
+                            if getattr(repaired, 'is_watertight', False):
+                                volume_m3 = repaired.volume / 1_000_000_000.0
+                                is_watertight = True
+                        except Exception:
+                            pass
+
+                    # 2) Voxelization — แบ่งพื้นที่เป็นลูกบาศก์เล็กๆ แล้วนับว่าลูกบาศก์ไหนอยู่
+                    # ข้างในโมเดล ทนทานต่อรูรั่วเล็ก-กลางได้ดีกว่า fill_holes มาก และแม่นยำ
+                    # กว่า Convex Hull เพราะรู้จักส่วนเว้า/โพรงของรูปทรง — ปรับขนาด voxel
+                    # (pitch) ตามสัดส่วนของโมเดลเอง กันไม่ให้โมเดลใหญ่ใช้ voxel ละเอียดเกินไป
+                    # จนกิน RAM/เวลานาน (ควบคุมไว้ที่ราว 60 voxel ต่อด้านยาวที่สุด)
+                    if volume_m3 <= 0:
+                        try:
+                            longest_edge_mm = max(float(final_mesh.extents.max()), 1.0)
+                            pitch_mm = max(longest_edge_mm / 60.0, 0.5)
+                            voxel_grid = final_mesh.voxelized(pitch=pitch_mm).fill()
+                            voxel_count = int(voxel_grid.matrix.sum())
+                            if voxel_count > 0:
+                                volume_m3 = (voxel_count * (pitch_mm ** 3)) / 1_000_000_000.0
+                                used_voxel_estimate = True
+                        except Exception:
+                            pass
+
+                    # 3) Convex Hull — ย้ายมาเป็นขั้นรองจากเดิม (เดิมเป็นขั้นแรก) เพราะมักสูง
+                    # เกินจริงสำหรับรูปทรงที่มีส่วนเว้า แต่ยังดีกว่าไม่มีตัวเลขเลย
+                    if volume_m3 <= 0:
                         try:
                             hull = final_mesh.convex_hull
                             volume_m3 = hull.volume / 1_000_000_000.0
@@ -791,22 +852,8 @@ if page == t["page_1_name"]:
                         except Exception:
                             volume_m3 = 0.0
 
-                    # FIX: previously, if the mesh wasn't watertight AND convex_hull()
-                    # also failed/returned 0, volume_m3 stayed exactly 0 and that 0
-                    # silently flowed into every downstream calculation (page 2's 3D
-                    # print time estimate collapsed to program+setup only, with zero
-                    # machine time, because effective_volume got capped at 0). Two
-                    # more attempts before giving up:
-                    if volume_m3 <= 0:
-                        try:
-                            repaired = final_mesh.copy()
-                            trimesh.repair.fill_holes(repaired)
-                            if getattr(repaired, 'is_watertight', False):
-                                volume_m3 = repaired.volume / 1_000_000_000.0
-                                is_watertight = True
-                                used_convex_hull = False
-                        except Exception:
-                            pass
+                    # 4) เดาคร่าวสุดท้ายจาก Bounding Box (เหมือนเดิม — ใช้เฉพาะกรณีทุกวิธี
+                    # ข้างบนล้มเหลวหมด ซึ่งควรเกิดขึ้นน้อยมากหลังเพิ่ม voxelization แล้ว)
                     if volume_m3 <= 0:
                         try:
                             # ASSUMPTION: ไม่รู้ solidity จริงของโมเดล ใช้ 40% ของปริมาตร
@@ -886,21 +933,39 @@ if page == t["page_1_name"]:
 
                 if is_watertight:
                     res_b.metric(t["vol_exact"], f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
+                elif used_voxel_estimate and volume_m3 > 0:
+                    # FIX: เพิ่มขั้น Voxelization เป็นทางเลือกก่อนถึง Convex Hull/Bounding Box
+                    # แม่นยำกว่าทั้งสองวิธีนั้นสำหรับไฟล์รั่วที่ยังพอซ่อมเป็นรูปทรงปิดไม่ได้
+                    res_b.metric(
+                        "ปริมาตร (ประมาณจาก Voxelization)" if lang == "TH" else "Volume (Voxelized estimate)",
+                        f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm"
+                    )
+                    st.info(
+                        "💡 โมเดลนี้ไม่ปิดสนิท (มีรูรั่ว) และซ่อมให้ปิดสนิทไม่สำเร็จ ระบบจึง"
+                        "ประมาณปริมาตรด้วยวิธี Voxelization (แบ่งพื้นที่เป็นลูกบาศก์เล็กๆ "
+                        "แล้วนับว่าลูกบาศก์ไหนอยู่ข้างในโมเดล) ซึ่งแม่นยำกว่า Convex Hull "
+                        "มาก แต่ยังไม่เท่าปริมาตรที่คำนวณจากรูปทรงปิดสนิทจริง"
+                        if lang == "TH" else
+                        "💡 This mesh isn't watertight and couldn't be repaired. Volume is "
+                        "estimated via voxelization (filling the shape with small cubes and "
+                        "counting the interior ones) — far more accurate than a Convex Hull, "
+                        "though still not as exact as a truly watertight mesh."
+                    )
                 elif used_bbox_estimate and volume_m3 > 0:
                     res_b.metric(
                         "ปริมาตร (ประมาณจาก Bounding Box)" if lang == "TH" else "Volume (Bounding Box estimate)",
                         f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm"
                     )
                     st.warning(
-                        "⚠️ โมเดลนี้คำนวณปริมาตรแบบละเอียดไม่ได้ (ไม่ watertight และ "
-                        "Convex Hull ก็ล้มเหลว) ตัวเลขนี้จึงเป็นการประมาณคร่าวๆ จาก "
-                        "Bounding Box เท่านั้น (สมมติความตัน 40%) ไม่แม่นยำเท่าปริมาตรจริง "
-                        "— ควรตรวจสอบไฟล์ 3D ต้นฉบับว่ามีรูรั่ว/geometry เสียหรือไม่"
+                        "⚠️ โมเดลนี้คำนวณปริมาตรแบบละเอียดไม่ได้เลย (ไม่ watertight, ซ่อมไม่ได้, "
+                        "Voxelization ก็ล้มเหลว, Convex Hull ก็ล้มเหลว) ตัวเลขนี้จึงเป็นการ"
+                        "ประมาณคร่าวๆ จาก Bounding Box เท่านั้น (สมมติความตัน 40%) ไม่แม่นยำเท่า"
+                        "ปริมาตรจริง — ควรตรวจสอบไฟล์ 3D ต้นฉบับว่ามีรูรั่ว/geometry เสียหนักแค่ไหน"
                         if lang == "TH" else
-                        "⚠️ Couldn't compute an exact volume for this mesh (not "
-                        "watertight, and Convex Hull also failed). This is a rough "
-                        "estimate from the bounding box only (assuming 40% solidity) — "
-                        "check the source 3D file for holes/broken geometry."
+                        "⚠️ Couldn't compute a detailed volume at all (not watertight, repair "
+                        "failed, voxelization failed, and Convex Hull also failed). This is a "
+                        "rough estimate from the bounding box only (assuming 40% solidity) — "
+                        "check the source 3D file for how badly broken the geometry is."
                     )
                 elif used_convex_hull and volume_m3 > 0:
                     res_b.metric(t["vol_hull"], f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
@@ -1158,12 +1223,27 @@ elif page == t["page_2_name"]:
                         complexity_level=complexity_level,
                     )
                     suggested_qty = print_result.hours
+                    bd = print_result.breakdown
+                    # FIX: อัปเดตตามสูตรใหม่ที่ calibrate จากใบประเมินจริง 7 ใบ — โชว์น้ำหนัก,
+                    # จำนวนม้วน PETG, และราคาวัสดุโดยประมาณ (ที่ขอให้วิเคราะห์การใช้เนื้อวัสดุ)
                     st.caption(
-                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น น้ำหนักที่คาดว่าจะใช้ "
-                        f"~{print_result.breakdown['estimated_weight_g']:.0f} g "
-                        f"จากปริมาตรพิมพ์จริง {print_result.breakdown['effective_volume_cm3']} cm³ "
-                        f"(อัตรา {print_result.breakdown['hours_per_cm3']:.5f} ชม./cm³)"
+                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น: น้ำหนัก ~{bd['estimated_weight_g']:.0f} g "
+                        f"(ที่ {bd['infill_pct']:.0f}% infill) = **{bd['petg_rolls']:.1f} ม้วน** "
+                        f"(≈ {bd['petg_cost_baht']:,.0f} บาท ที่ 960 บาท/ม้วน) "
+                        f"| Machine {bd['machine_hours']:.1f} ชม. + Program {bd['program_hours']:.0f} ชม. "
+                        f"= {suggested_qty:.1f} ชม. ที่คิดเงิน (Setup {bd['setup_hours']:.0f} ชม. ไม่คิดเงิน)"
                     )
+                    if bd.get("outside_calibrated_range"):
+                        lo, hi = bd["calibrated_sqm_range"]
+                        st.caption(
+                            f"⚠️ พื้นที่ผิวโมเดลนี้ ({bd['surface_area_sqm']:.2f} ตร.ม.) อยู่นอกช่วงข้อมูล"
+                            f"จริงที่ใช้ calibrate สูตร ({lo:.1f}-{hi:.1f} ตร.ม.) — ตัวเลขนี้เป็นการประมาณ"
+                            f"นอกช่วงข้อมูล ควรตรวจทานก่อนใช้จริง"
+                            if lang == "TH" else
+                            f"⚠️ This model's surface area ({bd['surface_area_sqm']:.2f} sqm) is outside "
+                            f"the calibrated range ({lo:.1f}-{hi:.1f} sqm) — extrapolated estimate, "
+                            f"please double-check before relying on it."
+                        )
                     op_qty = st.number_input(
                         t["op_qty_hr"], min_value=0.0, value=float(suggested_qty), step=0.5,
                         key=f"op_qty_{selected_machine}"
@@ -1268,6 +1348,8 @@ elif page == t["page_2_name"]:
                 slice_mode=current_slice_mode
             )
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
+            # หมายเหตุ: เดิมมีตาราง "แผนการตัดแบ่งจริง" (นับจำนวนก้อนตามกริด) อยู่ใต้ภาพนี้
+            # ตัดออกตามที่ขอ — เหลือแค่ภาพจำลอง/กริดอ้างอิงไว้ดูเฉยๆ ไม่มีตัวเลขสรุปด้านล่าง
 
         st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
@@ -1317,54 +1399,31 @@ elif page == t["page_2_name"]:
     # ==========================================
     # 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)
     # ==========================================
-    # ใช้สูตร "พื้นที่ผิว" (surface_area_sqm) — fit จากใบประเมินจริง 6 ตัวอย่าง ครอบคลุม
-    # ตั้งแต่โมเดลเล็ก (Boo ~1.95m) ถึงใหญ่มาก (Sully 8m) R²=0.98 (ดูรายละเอียดสูตรและ
-    # เหตุผลที่พื้นที่ผิวแม่นกว่า bounding box ใน machining_estimator.py) — ไม่ใช้
-    # bounding box / max_segment_mm ในการคำนวณตัวเลขนี้อีกต่อไป (สไลเดอร์ "ขนาดบล็อกโฟม
-    # สูงสุดต่อชิ้น" ด้านบนยังมีผลแค่กับภาพจำลองการตัดชั้นเท่านั้น)
+    # ใช้สูตร "พื้นที่ผิว" (surface_area_sqm) — fit จากใบประเมินจริง 8 ตัวอย่าง ครอบคลุม
+    # ตั้งแต่โมเดลเล็ก (Apple Jack/Twilight ~0.9m) ถึงใหญ่มาก (Sully 8m) R²=0.988 (ดูรายละเอียด
+    # สูตรและเหตุผลที่พื้นที่ผิวแม่นกว่า bounding box ใน machining_estimator.py)
     #
-    # ถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) รวมพื้นที่ผิวของแต่ละชิ้นส่วนจริง (sm.area)
-    # แทนพื้นที่ผิวรวมทั้งโมเดล — ถ้า get_submeshes() ใช้งานไม่ได้ (เช่น trimesh/networkx
-    # เวอร์ชันไม่เข้ากัน) จะ fallback ไปใช้พื้นที่ผิวรวมทั้งโมเดลแทน ไม่ทำให้ทั้งหน้าพัง
+    # FIX (สำคัญ): เดิมถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) จะรวมพื้นที่ผิวของแต่ละ
+    # ชิ้นส่วนแยกกัน (sm.area ของแต่ละชิ้นบวกกัน) ซึ่ง "นับพื้นที่ผิวเกินจริง" มาก เพราะรอยตัด
+    # ระหว่างชิ้นส่วน (เช่น รอยต่อแขนกับลำตัว) แต่เดิมเป็นพื้นผิวที่ซ่อนอยู่ข้างในโมเดล (ไม่นับ
+    # เป็นพื้นที่ผิวภายนอก) แต่พอแยกเป็นคนละชิ้น รอยตัดนั้นกลายเป็น "ผิวนอก" ของแต่ละชิ้นทันที
+    # ยิ่งโมเดลแยกหลายชิ้นเท่าไหร่ ยิ่งนับซ้ำเกินจริงมากขึ้นเรื่อยๆ (เคยทำให้ Sully8m ที่จริง
+    # พื้นที่ผิว 168 ตร.ม. กลายเป็น 227+ ตร.ม. จนคำนวณได้ 112.7 ก้อน ทั้งที่จริงใช้แค่ ~74 ก้อน)
+    # ตอนนี้ใช้พื้นที่ผิวรวมทั้งโมเดล (per_piece_area จากหน้า 1 มี trimesh คำนวณให้ตรงอยู่แล้ว)
+    # เสมอ ไม่ว่าโมเดลจะแยกกี่ชิ้นส่วนก็ตาม — ตรงกับพื้นที่ผิวที่ใบประเมินจริงใช้ (นับทั้งตัว)
     st.markdown("---")
     st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
 
-    submeshes_for_blocks = []
-    submesh_split_failed = False
-    if submesh_count > 1 and current_mesh is not None:
-        try:
-            submeshes_for_blocks = get_submeshes(current_mesh)
-        except Exception:
-            # FIX: get_submeshes() (mesh.split() ผ่าน trimesh -> networkx) เคยพังทั้งหน้า
-            # เพราะไม่มีการดักจับ error เลย ตอนนี้ถ้าแยกชิ้นส่วนไม่สำเร็จ จะ fallback ไปคำนวณ
-            # จากพื้นที่ผิวรวมทั้งโมเดลแทน แล้วแจ้งเตือนผู้ใช้เฉยๆ ไม่ทำให้แอป error
-            submesh_split_failed = True
-
     total_blocks = 0.0
     per_piece_blocks = 0.0
-    is_multi_part = submesh_count > 1 and len(submeshes_for_blocks) > 1
-    used_surface_area_sqm = per_piece_area  # ค่าเริ่มต้น (ใช้เมื่อไม่ใช่ multi-part)
+    used_surface_area_sqm = per_piece_area
 
-    if is_multi_part:
-        per_part_sqm = [float(sm.area) / 1_000_000.0 for sm in submeshes_for_blocks]
-        used_surface_area_sqm = sum(per_part_sqm)
-        per_part_blocks = [estimate_foam_blocks_needed(sqm)["blocks_needed"] for sqm in per_part_sqm]
-        per_piece_blocks = round(sum(per_part_blocks), 1)
-        total_blocks = round(per_piece_blocks * production_qty, 1)
-    elif per_piece_area > 0:
+    if per_piece_area > 0:
         calc = estimate_foam_blocks_needed(per_piece_area)
         per_piece_blocks = calc["blocks_needed"]
         total_blocks = round(per_piece_blocks * production_qty, 1)
 
     if per_piece_area > 0:
-        if submesh_split_failed:
-            st.caption(
-                "⚠️ แยกชิ้นส่วนโมเดลอัตโนมัติไม่สำเร็จ ตัวเลขด้านล่างคำนวณจากพื้นที่ผิวรวม"
-                "ทั้งโมเดลแทน"
-                if lang == "TH" else
-                "⚠️ Automatic part-splitting failed — the number below is calculated from the "
-                "whole-model surface area instead."
-            )
         # ตามที่ขอ: โชว์แค่ตัวเลขเดียว "ปริมาณวัตถุดิบโฟมที่ต้องใช้ X ชิ้น" ไม่ต้องแยก
         # ยอดรวม/เฉลี่ยต่อชิ้นให้ซับซ้อน — total_blocks คือยอดรวมทั้ง production_qty แล้ว
         st.info(
@@ -1372,17 +1431,26 @@ elif page == t["page_2_name"]:
             if lang == "TH" else
             f"Foam material required: {total_blocks:.1f} piece(s)"
         )
-        # FIX: เพิ่มคำอธิบายที่มาของตัวเลข ให้เห็นชัดว่าคำนวณจากพื้นที่ผิว ไม่ใช่ bounding
-        # box/สไลเดอร์อีกต่อไป — กันความสับสนจากเวอร์ชันก่อนหน้า
+        # FIX: เพิ่มคำอธิบายที่มาของตัวเลข ให้เห็นชัดว่าคำนวณจากพื้นที่ผิวรวมทั้งโมเดล
+        # (ไม่ใช่ผลรวมของแต่ละชิ้นส่วนแยกกันอีกต่อไป — ดูหมายเหตุ FIX ด้านบน)
         st.caption(
-            f"📐 คำนวณจากพื้นที่ผิวโมเดล {used_surface_area_sqm:.2f} ตร.ม. "
-            f"({len(submeshes_for_blocks)} ชิ้นส่วนรวมกัน)" if is_multi_part else
             f"📐 คำนวณจากพื้นที่ผิวโมเดล {used_surface_area_sqm:.2f} ตร.ม."
             if lang == "TH" else
-            (f"📐 Calculated from combined surface area of {len(submeshes_for_blocks)} parts "
-             f"= {used_surface_area_sqm:.2f} sq.m." if is_multi_part else
-             f"📐 Calculated from model surface area = {used_surface_area_sqm:.2f} sq.m.")
+            f"📐 Calculated from model surface area = {used_surface_area_sqm:.2f} sq.m."
         )
+        # FIX (ตามที่ขอ): เตือนช่วงความแม่นยำสำหรับงานใหญ่ (สูงเกิน 2 เมตร) ให้เห็นชัดว่า
+        # ตัวเลขนี้ fit จากข้อมูลจริง 8 ตัวอย่าง (error -31% ถึง +23% ต่อจุด) — งานใหญ่ควร
+        # ตรวจทานเพิ่มก่อนสั่งซื้อจริง ไม่ควรใช้เป็นตัวเลขสุดท้ายแบบเป๊ะๆ ทันที
+        if z_mm > 2000:
+            st.caption(
+                "⚠️ งานขนาดใหญ่ (สูงเกิน 2 เมตร) ตัวเลขนี้อ้างอิงจากข้อมูลใบประเมินจริงที่มี "
+                "อยู่ตอนนี้เพียง 8 ตัวอย่าง ยังคลาดเคลื่อนได้ประมาณ -31% ถึง +23% ต่อชิ้นงาน — "
+                "แนะนำให้ผู้มีประสบการณ์ตรวจทานอีกครั้งก่อนสั่งซื้อวัสดุจริง"
+                if lang == "TH" else
+                "⚠️ For large jobs (height over 2m), this estimate is calibrated from only 8 "
+                "real reference quotes and can be off by roughly -31% to +23% per job — please "
+                "have someone experienced double-check before ordering material."
+            )
     else:
         st.info(
             "อัปโหลดไฟล์ 3D ที่หน้าแรกก่อน เพื่อคำนวณจำนวนก้อนโฟม"
