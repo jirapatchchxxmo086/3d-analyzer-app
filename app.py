@@ -227,7 +227,7 @@ TEXTS = {
         "mch_cost": "ค่าประมวลผลเครื่องจักร",
         "mat_cost": "ค่าวัสดุและอุปกรณ์",
         "paint_cost": "ค่าเคลือบผิว & ทำสี",
-        "grand_total": "🏷️ ราคารวมประมาณการ (Grand Total)",
+        "Total_Estimate_Cost": "🏷️ ราคารวมประมาณการ (Total Estimate Cost)",
     },
     "EN": {
         "sidebar_menu": "📌 Main Menu",
@@ -321,7 +321,7 @@ TEXTS = {
         "mch_cost": "Machine Processing Cost",
         "mat_cost": "Material & Equipment Cost",
         "paint_cost": "Coating & Painting Cost",
-        "grand_total": "🏷️ Grand Total Estimated Price",
+        "Total_Estimate_Cost": "🏷️ Total Estimated Cost",
     }
 }
 
@@ -1745,5 +1745,5 @@ elif page == t["page_2_name"]:
     col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
     col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
 
-    st.markdown(f"### {t['grand_total']}")
+    st.markdown(f"### {t['Total_Estimate_Cost']}")
     st.title(f"฿ {subtotal:,.2f} THB")
