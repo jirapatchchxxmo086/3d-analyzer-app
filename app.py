@@ -1745,5 +1745,5 @@ elif page == t["page_2_name"]:
     col_res2.metric(t["mat_cost"], f"฿{material_total_price:,.2f}")
     col_res3.metric(t["paint_cost"], f"฿{finishing_total:,.2f}")
 
-    st.markdown(f"### {t['grand_total']}")
+    st.markdown(f"### {t['Total_Estimate_Cost']}")
     st.title(f"฿ {subtotal:,.2f} THB")
