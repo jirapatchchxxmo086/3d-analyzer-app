@@ -41,11 +41,12 @@ FOAM_QTY_EXPONENT = 1.1285
 DEFAULT_FOAM_MAX_SEGMENT_MM = 1000.0
 
 # --- 3D Print FDM (PETG) Parameters ---
+FDM_GRAMS_PER_HOUR = 22.0
 FDM_PROGRAM_HOURS = 2.0
 FDM_SETUP_HOURS = 4.0
 FDM_GRAMS_PER_ROLL = 1000.0
-FDM_WEIGHT_K = 8535.7
-FDM_WEIGHT_EXPONENT = 1.289
+FDM_WEIGHT_K = 2600.0
+FDM_WEIGHT_EXPONENT = 1.05
 FDM_BASELINE_INFILL_PCT = 15.0
 FDM_CALIBRATED_SQM_RANGE = (0.4, 1.4)
 FDM_PETG_BAHT_PER_ROLL = 960.0
@@ -214,6 +215,7 @@ def estimate_3d_print_hours(
           "density_g_per_cm3": density,
           "net_weight_g": round(base_weight_g, 1),
           "estimated_weight_g": round(gross_weight_g, 1),
+          "petg_rolls": rolls_exact,
           "petg_rolls_exact": rolls_exact,
           "petg_rolls_allocated": rolls_to_buy,
           "petg_cost_baht": round(rolls_exact * FDM_PETG_BAHT_PER_ROLL, 0),
