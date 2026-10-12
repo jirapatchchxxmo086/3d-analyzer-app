@@ -1,236 +1,123 @@
-"""
-machining_estimator.py
-========================
-โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM
-พร้อมฟังก์ชันแนะนำจำนวนก้อนโฟมสำหรับผลิต (estimate_foam_blocks_needed)
-
-หมายเหตุการแก้ไข (สำคัญ):
-- estimate_foam_blocks_needed() ผ่านการปรับมาแล้วหลายรอบ (หารปริมาตร -> container-fit หมุน
-  อิสระ -> ตัดชั้น+คูณหน้าตัด -> ตัดชั้นอย่างเดียว) ทุกรอบก่อนหน้าใช้ได้กับโมเดลขนาดเล็ก-กลาง
-  (สูงไม่เกิน ~2 เมตร) แต่พังหนักกับโมเดลใหญ่ (คลาดเคลื่อนหลักร้อย% เทียบกับใบประเมินจริง)
-  เวอร์ชันนี้ (ล่าสุด) เปลี่ยนมาใช้ "พื้นที่ผิว" (surface_area_sqm) แทน bounding box ทั้งหมด
-  โดยตรงจากการเทียบข้อมูลใบประเมินจริง 6 ตัวอย่าง (Boo1.95m/2.6m, Mike3m/4m, Sully6m/8m):
-
-      Foam Qty = FOAM_QTY_K × (พื้นที่ผิว ตร.ม.) ^ FOAM_QTY_EXPONENT
-
-  fit ด้วย log-log regression ได้ K=0.3188, exponent=1.0627, R²=0.98 (error 0-33% ต่อจุด
-  เทียบกับก่อนหน้าที่คลาดเคลื่อนถึงหลักร้อย-พัน% สำหรับโมเดลใหญ่)
-
-  เหตุผลที่พื้นที่ผิวสัมพันธ์กับปริมาณโฟมมากกว่าปริมาตร/bounding box: จากใบประเมินจริง
-  โมเดลขนาดใหญ่ (เช่น Sully) มีรายการ "เหล็กกล่อง"/"เหล็กแผ่น" เป็นวัตถุดิบหลักร่วมด้วย —
-  แปลว่าใช้ "โครงเหล็กเป็นแกน แล้วหุ้มผิวด้วยโฟม" ไม่ใช่ก้อนโฟมตันเต็มทั้งก้อน ปริมาณโฟม
-  จึงแปรผันตามพื้นที่ผิวที่ต้องหุ้ม ไม่ใช่ปริมาตรหรือหน้าตัดของ bounding box
-
-  ผลคือ estimate_foam_blocks_needed() ไม่รับ width_mm/length_mm/height_mm/max_segment_mm
-  อีกต่อไป — รับแค่ surface_area_sqm อย่างเดียว ส่วน max_segment_mm (สไลเดอร์ Foam Slicing
-  Visualizer) ยังมีผลแค่กับภาพจำลองการตัดชั้น ไม่มีผลกับตัวเลขนี้แล้ว
-- estimate_foam_cnc_hours() ไม่คำนวณจำนวนก้อนโฟมซ้อนอยู่ข้างในอีกต่อไป (ก่อนหน้านี้มี
-  logic คำนวณก้อนโฟมซ้ำอยู่ทั้งในฟังก์ชันนี้และใน estimate_foam_blocks_needed() ซึ่งให้
-  ตัวเลขไม่ตรงกัน) — ให้ฟังก์ชันนี้โฟกัสแค่ชั่วโมงเครื่องจักร ส่วนจำนวนก้อนโฟมเรียก
-  estimate_foam_blocks_needed() แยกต่างหากที่เดียว
-"""
-
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
-import math
-
-
-@dataclass
-class MachiningEstimate:
-    hours: float
-    breakdown: Dict[str, Any]
-
-
-# ==========================================================================
-# ตารางพารามิเตอร์เครื่องจักรดิบ
-# ==========================================================================
-MACHINE_PARAMS = {
-    "Robot_Foam": {
-        "feed_rate_mm_per_min": 5000,
-        "tool_diameter_mm_range": (6, 20),
-        "stepover_pct_range": (0.30, 0.75),
-        "stepdown_mm_range": (10, 50),
-        "working_area_mm": (2000, 1200, 1000),
-        "material": "Foam",
-    },
-    "3D_Print_FDM": {"filament_diameter_mm": 1.75, "material": ("PETG", "PLA")},
-}
-
-# น้ำหนักวัสดุต่อปริมาตร (g/cm3)
-MATERIAL_DENSITY_G_PER_CM3 = {"PETG": 1.27, "PLA": 1.24}
-
-# --- Robot Foam Parameters ---
-FOAM_INTERCEPT_HR = 1.0
-FOAM_SLOPE_HR_PER_SQM = 2.20
-
-# --- 3D Print FDM Parameters ---
-WALL_THICKNESS_MM = 1.2  # ความหนาผนังมาตรฐาน (ประมาณ 3 รอบหัวฉีด 0.4 มม.)
-
-# --- Foam Block defaults ---
-# จำนวนก้อนโฟมคำนวณจากพื้นที่ผิว (ตร.ม.) — ค่า K/exponent fit จากใบประเมินจริง 6 ตัวอย่าง
-# (ดูหมายเหตุด้านบน) — R²=0.98
-FOAM_QTY_K = 0.3188
-FOAM_QTY_EXPONENT = 1.0627
-
-# max_segment_mm ยังใช้เป็นค่า default ของสไลเดอร์ "ขนาดบล็อกโฟมสูงสุดต่อชิ้น" ใน Foam
-# Slicing Visualizer สำหรับภาพจำลองการตัดชั้นเท่านั้น ไม่มีผลกับ Foam Qty อีกต่อไป
-DEFAULT_FOAM_MAX_SEGMENT_MM = 1000.0
-
-
-def clamp(value, minimum, maximum):
-    return max(minimum, min(value, maximum))
-
-
-def estimate_foam_cnc_hours(
-    volume_removal_cm3: float = 0.0,
-    surface_area_sqm: float = 0.0,
-    complexity_level: int = 3,
-    setup_hours_override: Optional[float] = None,
-    height_mm: float = 1000.0,
-    allow_anatomical_split: bool = True,
-    machine_name: str = "Robot_Foam",
-) -> MachiningEstimate:
-    """
-    ประเมินชั่วโมงกัด Robot CNC (โฟม) เท่านั้น — ไม่คำนวณจำนวนก้อนโฟมในฟังก์ชันนี้
-    (ใช้ estimate_foam_blocks_needed() แยกต่างหากสำหรับจำนวนก้อน)
-    """
-    area_sqm = max(surface_area_sqm, 0.0)
-
-    # ปรับตัวคูณความซับซ้อนให้อยู่ในช่วงสมเหตุสมผล (level 1-5)
-    complexity_factor = 1.0 + 0.12 * (clamp(complexity_level, 1, 5) - 3)
-
-    machine_hours_total = (FOAM_INTERCEPT_HR + (FOAM_SLOPE_HR_PER_SQM * area_sqm)) * complexity_factor
-
-    finishing_fraction = 0.35
-    finishing_hours = machine_hours_total * finishing_fraction
-    roughing_hours = machine_hours_total - finishing_hours
-
-    finish_tool_mm = 6.0 if complexity_level >= 4 else 10.0
-
-    program_hours = max(0.2, round(0.15 * area_sqm, 2))
-    if setup_hours_override is not None:
-        setup_hours = max(0.0, setup_hours_override)
-    else:
-        setup_hours = max(0.8, round(0.5 * area_sqm, 2))
-
-    return MachiningEstimate(
-        hours=round(roughing_hours + finishing_hours + program_hours + setup_hours, 2),
-        breakdown={
-            "machine_type": "Robot CNC (Foam)",
-            "surface_area_sqm": round(area_sqm, 4),
-            "machine_hours_total": round(machine_hours_total, 2),
-            "roughing_hours": round(roughing_hours, 2),
-            "finishing_hours": round(finishing_hours, 2),
-            "finish_tool_mm_used": finish_tool_mm,
-            "program_hours": round(program_hours, 2),
-            "setup_hours": round(setup_hours, 2),
-            "billed_total_hours_excl_setup": round(roughing_hours + finishing_hours + program_hours, 2),
-            "parts_count": 1,
-            "assembly_labor_hours": 0.0,
-            "hourly_rate_baht": 300,
-            "calibration_note": "Robot Foam baseline model",
-        },
-    )
-
-
-def estimate_foam_blocks_needed(
-    surface_area_sqm: float,
-) -> Dict[str, Any]:
-    """
-    คำนวณปริมาณวัตถุดิบโฟมที่ต้องใช้ จากพื้นที่ผิวของโมเดล (ตร.ม.) — fit จากใบประเมิน
-    จริง 6 ตัวอย่าง (Boo1.95m/2.6m, Mike3m/4m, Sully6m/8m) ครอบคลุมตั้งแต่โมเดลเล็กไปจน
-    ถึงใหญ่มาก (พื้นที่ผิว 5-168 ตร.ม.):
-
-        Foam Qty = FOAM_QTY_K × (surface_area_sqm) ^ FOAM_QTY_EXPONENT
-
-    เทียบกับข้อมูลจริง (R²=0.98, error 0-33% ต่อจุด):
-    - boo1.95m (5.1 ตร.ม.)  -> 1.8  (จริง 1.8)
-    - boo2.6m  (9.1 ตร.ม.)  -> 3.3  (จริง 2.5)
-    - mike3m   (17.5 ตร.ม.) -> 6.7  (จริง 9.0)
-    - mike4m   (30.5 ตร.ม.) -> 12.0 (จริง 14.0)
-    - sully6m  (94.5 ตร.ม.) -> 40.1 (จริง 34.0)
-    - sully8m  (168 ตร.ม.)  -> 73.8 (จริง 74.0)
-
-    แม่นยำกว่าทุกสูตรก่อนหน้ามาก (bounding-box/container-fit เคยคลาดเคลื่อนหลักร้อย-พัน%
-    สำหรับโมเดลใหญ่ — ดูหมายเหตุด้านบนของไฟล์)
-    """
-    surface_area_sqm = max(surface_area_sqm, 0.0)
-
-    if surface_area_sqm <= 0:
-        blocks_needed = 0.0
-    else:
-        blocks_needed = round(FOAM_QTY_K * (surface_area_sqm ** FOAM_QTY_EXPONENT), 1)
-
-    return {
-        "surface_area_sqm": round(surface_area_sqm, 3),
-        "blocks_needed": blocks_needed,
-        "formula_k": FOAM_QTY_K,
-        "formula_exponent": FOAM_QTY_EXPONENT,
-        "note": "Surface-area power-law estimate, calibrated against 6 real estimate sheets (R2=0.98)",
-    }
+# --- 3D Print FDM (PETG) Parameters — ปรับปรุงเพื่อความแม่นยำของเวลาพิมพ์ ---
+FDM_PROGRAM_HOURS = 2.0  # ปรับลดจาก 4.0 hr ให้สอดคล้องกับงานเตรียมไฟล์จริง
+FDM_SETUP_HOURS = 4.0  # ปรับลดจาก 8.0 hr ให้สมเหตุสมผล
+FDM_GRAMS_PER_ROLL = 1000.0
+FDM_WEIGHT_K = 8535.7
+FDM_WEIGHT_EXPONENT = 1.289
+FDM_BASELINE_INFILL_PCT = 15.0
+FDM_CALIBRATED_SQM_RANGE = (0.4, 1.4)
+FDM_PETG_BAHT_PER_ROLL = 960.0
 
 
 def estimate_3d_print_hours(
     volume_cm3: float = 0.0,
     surface_area_sqm: float = 0.0,
     infill_pct: float = 15.0,
+    layer_height_mm: float = 0.28,  # ค่าเริ่มต้นความหนาชั้นพิมพ์ (0.2, 0.28, 0.32)
     complexity_level: int = 4,
     technology: str = "FDM",
     material: str = "PETG",
+    waste_margin_pct: float = 8.0,  # เผื่อ Support & Loss 8%
 ) -> MachiningEstimate:
-    volume_cm3 = max(volume_cm3, 0.0)
-    area_sqm = max(surface_area_sqm, 0.0)
+  """ประเมินงาน 3D Print FDM (PETG) ปรับปรุงความแม่นยำของเวลาพิมพ์ (Machine Hours)
 
-    if area_sqm == 0.0 and volume_cm3 > 0.0:
-        approx_radius_cm = ((3.0 * volume_cm3) / (4.0 * math.pi)) ** (1.0 / 3.0)
-        area_sqm = (4.0 * math.pi * (approx_radius_cm ** 2)) / 10000.0
-    elif volume_cm3 == 0.0 and area_sqm > 0.0:
-        area_cm2 = area_sqm * 10_000.0
-        approx_radius_cm = math.sqrt(area_cm2 / (4.0 * math.pi)) if area_cm2 > 0 else 0.0
-        volume_cm3 = (4.0 / 3.0) * math.pi * (approx_radius_cm ** 3)
+  ตามสัดส่วนพื้นที่ผิว/น้ำหนัก และ Layer Height
+  """
+  volume_cm3 = max(volume_cm3, 0.0)
+  area_sqm = max(surface_area_sqm, 0.0)
 
-    shell_volume_cm3 = min(area_sqm * 10_000.0 * (WALL_THICKNESS_MM / 10.0), volume_cm3)
-    core_volume_cm3 = max(volume_cm3 - shell_volume_cm3, 0.0)
+  if area_sqm == 0.0 and volume_cm3 > 0.0:
+    approx_radius_cm = ((3.0 * volume_cm3) / (4.0 * math.pi)) ** (1.0 / 3.0)
+    area_sqm = (4.0 * math.pi * (approx_radius_cm**2)) / 10000.0
 
-    infill_fraction = max(0.0, min(infill_pct, 100.0)) / 100.0
-    effective_volume_cm3 = shell_volume_cm3 + (core_volume_cm3 * infill_fraction)
+  # 1. คำนวณน้ำหนักพลาสติก (Net & Gross Weight)
+  infill_effective = max(float(infill_pct), 5.0)
+  infill_factor = infill_effective / FDM_BASELINE_INFILL_PCT
 
-    density = MATERIAL_DENSITY_G_PER_CM3.get(material, MATERIAL_DENSITY_G_PER_CM3["PETG"])
-    weight_g = effective_volume_cm3 * density
+  base_weight_g = (
+      FDM_WEIGHT_K * (area_sqm**FDM_WEIGHT_EXPONENT) * infill_factor
+      if area_sqm > 0
+      else 0.0
+  )
+  gross_weight_g = base_weight_g * (1.0 + (waste_margin_pct / 100.0))
 
-    grams_per_hour = 45.0
-    machine_hours = weight_g / grams_per_hour
+  # 2. คำนวณอัตราการฉีดเนื้อพลาสติกแบบแปรผัน (Dynamic Extrusion Speed g/hr)
+  # สัดส่วนพื้นที่ผิวต่อน้ำหนัก (sq.m / kg)
+  weight_kg = gross_weight_g / 1000.0
+  area_to_weight_ratio = (
+      (area_sqm / weight_kg) if weight_kg > 0 else 1.0
+  )  # ปกติอยู่ช่วง 0.8 - 3.5
 
-    program_hours = max(0.5, round(weight_g / 3000.0, 2))
-    setup_hours = max(0.5, round(weight_g / 2500.0, 2))
+  # งานผิวเยอะ/รายละเอียดสูง (Ratio สูง) = พิมพ์ช้า (~16 g/hr)
+  # งานก้อนตัน/Infill เยอะ (Ratio ต่ำ) = พิมพ์เร็ว (~32 g/hr)
+  if area_to_weight_ratio > 2.0:
+    base_grams_per_hour = 16.0  # งานผิวเยอะ / มี Retraction เยอะ
+  elif area_to_weight_ratio < 1.0:
+    base_grams_per_hour = 30.0  # งานก้อนเนื้อตัน เดินเร็ว
+  else:
+    # Interpolate ระหว่าง 16 - 30 g/hr
+    base_grams_per_hour = 30.0 - (area_to_weight_ratio - 1.0) * 14.0
 
-    total_time = machine_hours + program_hours + setup_hours
+  # 3. ตัวคูณ Layer Height (อ้างอิงฐานที่ 0.28 mm)
+  # พิมพ์ละเอียดขึ้น (เช่น 0.2 mm) ใช้เวลานานขึ้น (+35%)
+  layer_factor = 0.28 / max(layer_height_mm, 0.1)
 
-    hours_per_cm3_val = round(machine_hours / effective_volume_cm3, 6) if effective_volume_cm3 > 0 else 0.0
+  # 4. คำนวณชั่วโมงพิมพ์จริง (Machine Hours)
+  effective_grams_per_hour = base_grams_per_hour / layer_factor
+  machine_hours = (
+      gross_weight_g / effective_grams_per_hour if gross_weight_g > 0 else 0.0
+  )
 
-    return MachiningEstimate(
-        hours=round(total_time, 2),
-        breakdown={
-            "machine_type": "3D Print FDM",
-            "surface_area_sqm": round(area_sqm, 4),
-            "volume_cm3": round(volume_cm3, 2),
-            "shell_volume_cm3": round(shell_volume_cm3, 2),
-            "core_volume_cm3": round(core_volume_cm3, 2),
-            "infill_pct": infill_pct,
-            "material": material,
-            "density_g_per_cm3": density,
-            "effective_volume_cm3": round(effective_volume_cm3, 2),
-            "estimated_weight_g": round(weight_g, 1),
-            "hours_per_cm3": hours_per_cm3_val,
-            "machine_hours": round(machine_hours, 2),
-            "roughing_hours": 0.0,
-            "finishing_hours": round(machine_hours, 2),
-            "finish_tool_mm_used": 0.4,
-            "program_hours": round(program_hours, 2),
-            "setup_hours": round(setup_hours, 2),
-            "parts_count": 1,
-            "assembly_labor_hours": 0.0,
-            "hourly_rate_baht": 50,
-            "calibration_note": "Refined stable FDM parameters",
-        },
-    )
+  # ช่วงเวลาประมาณการหน้างาน (Min - Max Hours: ±15%)
+  hours_min = round(machine_hours * 0.85, 1)
+  hours_max = round(machine_hours * 1.15, 1)
+
+  # 5. Program & Setup Hours
+  program_hours = FDM_PROGRAM_HOURS if gross_weight_g > 0 else 0.0
+  setup_hours = FDM_SETUP_HOURS if gross_weight_g > 0 else 0.0
+  billed_hours = machine_hours + program_hours
+
+  # 6. ม้วน PETG
+  rolls_exact = round(gross_weight_g / FDM_GRAMS_PER_ROLL, 2)
+  rolls_to_buy = math.ceil(gross_weight_g / FDM_GRAMS_PER_ROLL)
+
+  density = MATERIAL_DENSITY_G_PER_CM3.get(
+      material, MATERIAL_DENSITY_G_PER_CM3["PETG"]
+  )
+  plastic_volume_cm3 = gross_weight_g / density if density > 0 else 0.0
+
+  lo, hi = FDM_CALIBRATED_SQM_RANGE
+  outside_range = area_sqm > 0 and not (lo <= area_sqm <= hi)
+
+  return MachiningEstimate(
+      hours=round(billed_hours, 2),
+      breakdown={
+          "machine_type": "3D Print FDM",
+          "surface_area_sqm": round(area_sqm, 4),
+          "infill_pct": infill_pct,
+          "layer_height_mm": layer_height_mm,
+          "material": material,
+          "density_g_per_cm3": density,
+          # --- ข้อมูลน้ำหนักและม้วนพลาสติก ---
+          "net_weight_g": round(base_weight_g, 1),
+          "estimated_weight_g": round(gross_weight_g, 1),
+          "petg_rolls_exact": rolls_exact,
+          "petg_rolls_allocated": rolls_to_buy,
+          "petg_cost_baht": round(rolls_exact * FDM_PETG_BAHT_PER_ROLL, 0),
+          "effective_volume_cm3": round(plastic_volume_cm3, 2),
+          # --- ชั่วโมงการทำงานและช่วงประเมิน ---
+          "effective_grams_per_hour": round(effective_grams_per_hour, 1),
+          "machine_hours": round(machine_hours, 2),
+          "machine_hours_range": (hours_min, hours_max),  # (ชั่วโมง Min, Max)
+          "program_hours": round(program_hours, 2),
+          "setup_hours": round(setup_hours, 2),
+          "billed_total_hours_excl_setup": round(billed_hours, 2),
+          "hourly_rate_baht": 50,
+          "outside_calibrated_range": outside_range,
+          "calibrated_sqm_range": FDM_CALIBRATED_SQM_RANGE,
+          "calibration_note": (
+              "FDM dynamic flow-rate model based on surface-to-weight ratio and"
+              " layer height"
+          ),
+      },
+  )
