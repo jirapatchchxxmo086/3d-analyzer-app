@@ -1,90 +1,157 @@
 import numpy as np
 
+
 class CNCController:
-    def __init__(self, safe_z: float = 10.0):
-        self.toolpath_planar = []
-        self.toolpath_joints = {}
-        self.safe_z = safe_z
 
-    def generate_planar_toolpath(self, surface_z: float, bounds: tuple, stepover: float):
-        self.toolpath_planar = []
-        x_min, x_max, y_min, y_max = bounds
-        
-        if stepover <= 0:
-            stepover = 10.0
+  def __init__(self, safe_z: float = 10.0, plunge_feed: float = 300.0):
+    self.toolpath_planar = []
+    self.toolpath_joints = {}
+    self.safe_z = safe_z
+    self.plunge_feed = plunge_feed  # ความเร็วป้อนลงแนวแกน Z (mm/min)
 
-        y_curr = y_min
-        direction = 1
-        
-        while y_curr <= y_max:
-            if direction == 1:
-                self.toolpath_planar.append((x_min, y_curr, surface_z))
-                self.toolpath_planar.append((x_max, y_curr, surface_z))
-            else:
-                self.toolpath_planar.append((x_max, y_curr, surface_z))
-                self.toolpath_planar.append((x_min, y_curr, surface_z))
-            
-            y_curr += stepover
-            direction *= -1
-            
-        return self.toolpath_planar
+  def generate_planar_toolpath(
+      self, surface_z: float, bounds: tuple, stepover: float
+  ):
+    """สร้าง Toolpath สำหรับกัดปาดหน้าโฟม (Zig-zag Planar)"""
+    self.toolpath_planar = []
+    x_min, x_max, y_min, y_max = bounds
 
-    def generate_joint_machining_toolpath(self, joint_list: list):
-        self.toolpath_joints = {}
-        for joint in joint_list:
-            joint_id = joint.get('id', 'joint')
-            center_x, center_y = joint.get('center', (0, 0))
-            radius = joint.get('radius', 10.0)
-            depth = joint.get('depth', 5.0)
-            
-            joint_path = []
-            if depth <= 0:
-                continue
+    if stepover <= 0:
+      stepover = 10.0
 
-            for z in np.arange(0.5, depth + 0.5, 0.5):
-                angles = np.linspace(0, 2 * np.pi, 36)
-                for theta in angles:
-                    x = center_x + radius * np.cos(theta)
-                    y = center_y + radius * np.sin(theta)
-                    joint_path.append((x, y, -z))
-            
-            self.toolpath_joints[joint_id] = joint_path
-            
-        return self.toolpath_joints
+    y_curr = y_min
+    direction = 1
 
-    def export_gcode(self, mode: str = "all") -> str:
-        gcode = [
-            "G21 ; Unit mm", 
-            "G90 ; Absolute positioning",
-            f"G0 Z{self.safe_z:.3f} ; Move to Safe Z"
-        ]
-        
-        if mode in ["all", "planar"] and self.toolpath_planar:
-            gcode.append("(--- START PLANAR MACHINING ---)")
-            first_pt = self.toolpath_planar[0]
-            gcode.append(f"G0 X{first_pt[0]:.3f} Y{first_pt[1]:.3f}")
-            gcode.append(f"G1 Z{first_pt[2]:.3f} F500")
-            
-            for pt in self.toolpath_planar:
-                gcode.append(f"G1 X{pt[0]:.3f} Y{pt[1]:.3f} Z{pt[2]:.3f} F1000")
-            
-            gcode.append(f"G0 Z{self.safe_z:.3f} ; Retract to Safe Z")
+    while y_curr <= y_max:
+      if direction == 1:
+        self.toolpath_planar.append((x_min, y_curr, surface_z))
+        self.toolpath_planar.append((x_max, y_curr, surface_z))
+      else:
+        self.toolpath_planar.append((x_max, y_curr, surface_z))
+        self.toolpath_planar.append((x_min, y_curr, surface_z))
 
-        if mode in ["all", "joints"] and self.toolpath_joints:
-            gcode.append("(--- START JOINT-BY-JOINT MACHINING ---)")
-            for joint_id, path in self.toolpath_joints.items():
-                if not path:
-                    continue
-                gcode.append(f"( Toolpath for Joint: {joint_id} )")
-                
-                first_pt = path[0]
-                gcode.append(f"G0 Z{self.safe_z:.3f}")
-                gcode.append(f"G0 X{first_pt[0]:.3f} Y{first_pt[1]:.3f}")
-                
-                for pt in path:
-                    gcode.append(f"G1 X{pt[0]:.3f} Y{pt[1]:.3f} Z{pt[2]:.3f} F800")
-                
-                gcode.append(f"G0 Z{self.safe_z:.3f} ; Retract to Safe Z")
+      y_curr += stepover
+      direction *= -1
 
-        gcode.append("M30 ; End of program")
-        return "\n".join(gcode)
+    return self.toolpath_planar
+
+  def generate_joint_machining_toolpath(
+      self, joint_list: list, stepdown: float = 1.0, num_points: int = 24
+  ):
+    """สร้าง Toolpath สำหรับเจาะเบ้า/ข้อต่อ (Joints) แบบปรับปรุงประสิทธิภาพลดบรรทัด G-code"""
+    self.toolpath_joints = {}
+
+    for joint in joint_list:
+      joint_id = joint.get('id', 'joint')
+      center_x, center_y = joint.get('center', (0, 0))
+      radius = joint.get('radius', 10.0)
+      depth = joint.get('depth', 5.0)
+
+      joint_path = []
+      if depth <= 0 or radius <= 0:
+        continue
+
+      angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False)
+      z_levels = np.arange(stepdown, depth + stepdown, stepdown)
+
+      for z in z_levels:
+        actual_z = min(z, depth)
+        for theta in angles:
+          x = center_x + radius * np.cos(theta)
+          y = center_y + radius * np.sin(theta)
+          joint_path.append((x, y, -actual_z))
+
+      self.toolpath_joints[joint_id] = joint_path
+
+    return self.toolpath_joints
+
+  def calculate_estimated_time(self, feedrate_xy: float = 1200.0) -> dict:
+    """คำนวณระยะทางเดินรวม (mm) และเวลาประเมินในการกัดโฟม (นาที/ชั่วโมง) ส่งไปคิดราคาบน Streamlit"""
+    total_dist_mm = 0.0
+
+    # 1. ระยะทาง Planar Toolpath
+    if len(self.toolpath_planar) > 1:
+      pts = np.array(self.toolpath_planar)
+      dists = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
+      total_dist_mm += np.sum(dists)
+
+    # 2. ระยะทาง Joint Toolpath
+    for path in self.toolpath_joints.values():
+      if len(path) > 1:
+        pts = np.array(path)
+        dists = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
+        total_dist_mm += np.sum(dists)
+
+    # เวลาประเมิน = ระยะทาง (mm) / Feedrate (mm/min)
+    estimated_time_min = total_dist_mm / feedrate_xy if feedrate_xy > 0 else 0
+
+    return {
+        'total_distance_mm': round(total_dist_mm, 2),
+        'estimated_time_min': round(estimated_time_min, 2),
+        'estimated_time_hrs': round(estimated_time_min / 60.0, 2),
+    }
+
+  def export_gcode(
+      self,
+      mode: str = 'all',
+      feed_xy: float = 1200.0,
+      feed_z: float = 400.0,
+  ) -> str:
+    """ส่งออกไฟล์ G-code พร้อมระบบ Safe Z และ Feedrate ที่ถูกต้อง"""
+    gcode = [
+        '(--- GENERATED BY 3D ANALYZER CNC ENGINE ---)',
+        'G21 ; Unit in mm',
+        'G90 ; Absolute positioning',
+        f'G0 Z{self.safe_z:.3f} ; Move to Safe Z Height',
+    ]
+
+    # --- PLANAR MACHINING ---
+    if mode in ['all', 'planar'] and self.toolpath_planar:
+      gcode.append('\n(--- START PLANAR SURFACE MACHINING ---)')
+      first_pt = self.toolpath_planar[0]
+
+      gcode.append(
+          f'G0 X{first_pt[0]:.3f} Y{first_pt[1]:.3f} ; Rapid to Start XY'
+      )
+      gcode.append(
+          f'G1 Z{first_pt[2]:.3f} F{feed_z:.0f} ; Plunge to Surface Z'
+      )
+
+      for pt in self.toolpath_planar[1:]:
+        gcode.append(
+            f'G1 X{pt[0]:.3f} Y{pt[1]:.3f} Z{pt[2]:.3f} F{feed_xy:.0f}'
+        )
+
+      gcode.append(f'G0 Z{self.safe_z:.3f} ; Retract to Safe Z')
+
+    # --- JOINT MACHINING ---
+    if mode in ['all', 'joints'] and self.toolpath_joints:
+      gcode.append('\n(--- START JOINT-BY-JOINT MACHINING ---)')
+
+      for joint_id, path in self.toolpath_joints.items():
+        if not path:
+          continue
+
+        gcode.append(f'\n( Toolpath for Joint: {joint_id} )')
+        first_pt = path[0]
+
+        gcode.append(f'G0 Z{self.safe_z:.3f}')
+        gcode.append(f'G0 X{first_pt[0]:.3f} Y{first_pt[1]:.3f}')
+        gcode.append(f'G1 Z{first_pt[2]:.3f} F{feed_z:.0f}')
+
+        current_z = first_pt[2]
+        for pt in path[1:]:
+          if abs(pt[2] - current_z) > 1e-4:
+            gcode.append(
+                f'G1 X{pt[0]:.3f} Y{pt[1]:.3f} Z{pt[2]:.3f} F{feed_z:.0f}'
+            )
+            current_z = pt[2]
+          else:
+            gcode.append(
+                f'G1 X{pt[0]:.3f} Y{pt[1]:.3f} Z{pt[2]:.3f} F{feed_xy:.0f}'
+            )
+
+        gcode.append(f'G0 Z{self.safe_z:.3f} ; Retract to Safe Z')
+
+    gcode.append('\nM30 ; End of program')
+    return '\n'.join(gcode)
