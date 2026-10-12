@@ -1228,7 +1228,7 @@ elif page == t["page_2_name"]:
                     # จำนวนม้วน PETG, และราคาวัสดุโดยประมาณ (ที่ขอให้วิเคราะห์การใช้เนื้อวัสดุ)
                     st.caption(
                         f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น: น้ำหนัก ~{bd['estimated_weight_g']:.0f} g "
-                        f"(ที่ {bd['infill_pct']:.0f}% infill) = **{bd['petg_rolls']:.1f} ม้วน** "
+                        f"(ที่ {bd['infill_pct']:.0f}% infill) = **{bd['petg_rolls_exact']:.1f}** ม้วน"
                         f"(≈ {bd['petg_cost_baht']:,.0f} บาท ที่ 960 บาท/ม้วน) "
                         f"| Machine {bd['machine_hours']:.1f} ชม. + Program {bd['program_hours']:.0f} ชม. "
                         f"= {suggested_qty:.1f} ชม. ที่คิดเงิน (Setup {bd['setup_hours']:.0f} ชม. ไม่คิดเงิน)"
