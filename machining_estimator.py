@@ -40,7 +40,7 @@ FOAM_QTY_K = 0.2469
 FOAM_QTY_EXPONENT = 1.1285
 DEFAULT_FOAM_MAX_SEGMENT_MM = 1000.0
 
-# --- 3D Print FDM (PETG) Parameters — Exact Cherry 104 Hours Calibration ---
+# --- 3D Print FDM (PETG) Parameters — Calibrated v2 ---
 FDM_PROGRAM_HOURS = 2.0
 FDM_SETUP_HOURS = 4.0
 FDM_GRAMS_PER_ROLL = 1000.0
