@@ -10,6 +10,7 @@ from string import Template
 import streamlit.components.v1 as components
 import auth
 from grid_visualizer import create_foam_grid_visualizer, get_submeshes, FOAM_GRID_WIDTH_MM, FOAM_GRID_LENGTH_MM
+from machining_estimator import estimate_3d_print_hours, estimate_foam_cnc_hours, estimate_petg_rolls_from_hours
 
 auth.require_login()
 
@@ -1224,12 +1225,16 @@ elif page == t["page_2_name"]:
                     )
                     suggested_qty = print_result.hours
                     bd = print_result.breakdown
-                    # FIX: อัปเดตตามสูตรใหม่ที่ calibrate จากใบประเมินจริง 7 ใบ — โชว์น้ำหนัก,
-                    # จำนวนม้วน PETG, และราคาวัสดุโดยประมาณ (ที่ขอให้วิเคราะห์การใช้เนื้อวัสดุ)
+
+                    # เรียกใช้ฟังก์ชันคำนวณม้วน PETG จากชั่วโมงพิมพ์ (machine_hours)
+                    petg_info = estimate_petg_rolls_from_hours(
+                        machine_hours=bd.get("machine_hours", 0)
+                    )
+
                     st.caption(
-                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น: น้ำหนัก ~{bd['estimated_weight_g']:.0f} g "
-                        f"(ที่ {bd['infill_pct']:.0f}% infill) = **{bd['petg_rolls_exact']:.1f}** ม้วน"
-                        f"(≈ {bd['petg_cost_baht']:,.0f} บาท ที่ 960 บาท/ม้วน) "
+                        f"⚙️ ประมาณอัตโนมัติต่อ 1 ชิ้น: น้ำหนัก ~{petg_info['gross_weight_g']:.0f} g "
+                        f"(ที่ {bd['infill_pct']:.0f}% infill) = **{petg_info['rolls_exact']:.1f}** ม้วน"
+                        f" (สั่งซื้อจริง **{petg_info['rolls_to_buy']}** ม้วน ≈ {petg_info['total_material_cost_baht']:,.0f} บาท ที่ {petg_info['baht_per_roll']:.0f} บาท/ม้วน) "
                         f"| Machine {bd['machine_hours']:.1f} ชม. + Program {bd['program_hours']:.0f} ชม. "
                         f"= {suggested_qty:.1f} ชม. ที่คิดเงิน (Setup {bd['setup_hours']:.0f} ชม. ไม่คิดเงิน)"
                     )
