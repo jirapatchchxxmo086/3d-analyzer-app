@@ -1443,6 +1443,22 @@ elif page == t["page_2_name"]:
             if lang == "TH" else
             f"📐 Calculated from model surface area = {used_surface_area_sqm:.2f} sq.m."
         )
+        # =========================================================
+        # 📦 ประเมินจำนวนม้วน PETG ที่ต้องใช้ (Recommended PETG Rolls)
+        # =========================================================
+            if selected_machine == "3D Print FDM":
+                petg_info = estimate_petg_rolls_from_hours(machine_hours=bd.get("machine_hours", 0))
+                st.markdown("---")
+                st.markdown("##### 📦 ประเมินจำนวนม้วน PETG ที่ต้องใช้ (Recommended PETG Rolls)")
+                st.info(
+                    f"ปริมาณวัตถุดิบ PETG ที่ต้องจัดซื้อ: {petg_info['rolls_to_buy']} ม้วน "
+                    f"(ใช้งานจริง {petg_info['rolls_exact']} ม้วน | น้ำหนักรวมประมาณ {petg_info['gross_weight_g']:,.0f} กรัม)"
+                    if lang == "TH"
+                    else f"PETG Rolls required: {petg_info['rolls_to_buy']} rolls (Exact {petg_info['rolls_exact']} rolls | Net weight approx {petg_info['gross_weight_g']:,.0f} g)"
+                )
+                st.caption(
+                    f"คำนวณจากเวลาพิมพ์ {petg_info['machine_hours']} ชม. (อัตราฉีด 20 g/ชม. รวม Waste 8%)"
+                )
         # FIX (ตามที่ขอ): เตือนช่วงความแม่นยำสำหรับงานใหญ่ (สูงเกิน 2 เมตร) ให้เห็นชัดว่า
         # ตัวเลขนี้ fit จากข้อมูลจริง 8 ตัวอย่าง (error -31% ถึง +23% ต่อจุด) — งานใหญ่ควร
         # ตรวจทานเพิ่มก่อนสั่งซื้อจริง ไม่ควรใช้เป็นตัวเลขสุดท้ายแบบเป๊ะๆ ทันที
