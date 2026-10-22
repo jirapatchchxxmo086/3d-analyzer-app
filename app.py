@@ -1864,19 +1864,15 @@ elif page == t["page_smart_name"]:
     st.subheader("🧊 ภาพจำลองการแบ่งก้อนโฟมจากโมเดล 3D จริง")
     st.caption("แสดงผลการตัดแบ่งชิ้นส่วน 3 มิติจากไฟล์ต้นฉบับโดยใช้ระบบ Grid Visualizer")
 
-    # ตรวจสอบว่ามีไฟล์ 3D ที่อัปโหลดและบันทึกไว้ใน session_state หรือไม่
-    # (โดยปกติมักเก็บไว้ในชื่อ 'mesh', 'uploaded_file' หรือผ่านฟังก์ชันของโปรเจกต์)
     mesh_obj = st.session_state.get("mesh", None)
 
     if mesh_obj is not None:
         try:
-            # เรียกใช้ฟังก์ชันสร้างภาพจำลอง Grid Visualizer ที่มีอยู่แล้วในโปรเจกต์ของคุณ
-            # (กำหนดความสูงโฟมจาก Slider ที่แปลงเป็นมิลลิเมตร: foam_h_mm = foam_h_cm * 10)
-            foam_h_mm = foam_h_cm
+            # เรียกใช้ฟังก์ชันโดยส่งค่าตามที่ระบบเดิมรองรับ (ตัด num_parts ออกเพื่อแก้ปัญหา unexpected keyword argument)
+            foam_h_mm = foam_h_cm  # ความสูงโฟมเป็นมิลลิเมตร
             
             fig_visualizer = create_foam_grid_visualizer(
                 mesh=mesh_obj,
-                num_parts=num_parts,
                 foam_height_mm=foam_h_mm
             )
             
@@ -1888,4 +1884,4 @@ elif page == t["page_smart_name"]:
         except Exception as e:
             st.error(f"⚠️ เกิดข้อผิดพลาดในการเรนเดอร์โมเดล 3D: {e}")
     else:
-        st.warning("⚠️ ยังไม่พบไฟล์โมเดล 3D ในระบบ กรุณาอัปโหลดไฟล์โมเดล 3D ที่หน้าแรก (Analyzer) ก่อนใช้งานฟังก์ชันนี้ครับ")
+        st.warning("⚠️ ยังไม่พบไฟล์โมเดล 3D ในระบบ กรุณาอัปโหลดไฟล์โมเดล 3D ที่หน้าแรก (Analyzer) ก่อนใช้งานฟังก์ชันนี้")
