@@ -1803,8 +1803,8 @@ elif page == t["page_smart_name"]:
     st.subheader("📏 กำหนดขนาดแผ่นโฟมดิบสำหรับการผลิต")
     
     col_f1, col_f2 = st.columns(2)
-    foam_width_cm = col_f1.metric("ความกว้างแผ่นโฟมมาตรฐาน", "60 ซม. (600 mm)")
-    foam_length_cm = col_f2.metric("ความยาวแผ่นโฟมมาตรฐาน", "120 ซม. (1200 mm)")
+    col_f1.metric("ความกว้างแผ่นโฟมมาตรฐาน", "60 ซม. (600 mm)")
+    col_f2.metric("ความยาวแผ่นโฟมมาตรฐาน", "120 ซม. (1200 mm)")
     
     # สไลเดอร์ปรับความสูงโฟม 1 - 3 เมตร (100 - 300 ซม.)
     foam_height_cm = st.slider("เลือกความสูงของแผ่นโฟม (เมตร):", min_value=1.0, max_value=3.0, value=1.8, step=0.1, format="%.1f เมตร")
@@ -1816,7 +1816,7 @@ elif page == t["page_smart_name"]:
         key="smart_complexity_sel"
     )
 
-    # 3. อัลกอริทึมแนะนำจำนวนส่วนอัตโนมัติ (อิงจากขนาด Bounding Box เทียบกับขนาดโฟม)
+    # 3. อัลกอริทึมแนะนำจำนวนส่วนอัตโนมัติ
     max_box_dim = max(box_w, box_l, box_h)
     if "เรียบง่าย" in complexity:
         rec_parts = 1
@@ -1825,7 +1825,7 @@ elif page == t["page_smart_name"]:
     else:
         rec_parts = 8 if max_box_dim <= 120 else 10
 
-    st.info(f"💡 **ผลการวิเคราะห์รูปทรง:** ระบบแนะนำให้แบ่งก้อนโฟมออกเป็น **{rec_parts} ส่วน** (เหมาะสมที่สุดสำหรับชิ้นงานขนาดนี้)")
+    st.info(f"💡 **ผลการวิเคราะห์รูปทรง:** ระบบแนะนำให้แบ่งก้อนโฟมออกเป็น **{rec_parts} ส่วน**")
 
     # 4. Slider ปรับเลือกจำนวนส่วน
     num_parts = st.slider("ปรับเลือกจำนวนส่วนที่ต้องการแบ่ง / Select number of parts:", min_value=1, max_value=12, value=rec_parts, key="smart_num_parts_slider")
@@ -1851,16 +1851,13 @@ elif page == t["page_smart_name"]:
 
     df_parts = pd.DataFrame(parts_list)
     
-    # 5. แสดงผลสรุปและตารางชิ้นส่วนย่อย
     st.markdown("---")
     st.subheader("📋 รายละเอียดขนาดโฟมแต่ละชิ้นส่วนที่แนะนำ")
     st.metric("จำนวนชิ้นส่วนที่แบ่งผลิต", f"{num_parts} ส่วน")
     st.dataframe(df_parts, use_container_width=True)
 
-    # ==========================================
-    # 🧊 นำโค้ดส่วนภาพจำลอง 3 มิติมาวางต่อตรงนี้ครับ
-    # ==========================================
-   st.markdown("---")
+    # 6. แสดงภาพจำลอง 3 มิติและการแบ่งโฟมจากโมเดลจริง
+    st.markdown("---")
     st.subheader("🧊 ภาพจำลองการแบ่งก้อนโฟมจากโมเดล 3D จริง")
     st.caption("แสดงผลการตัดแบ่งชิ้นส่วน 3 มิติจากไฟล์ต้นฉบับโดยใช้ระบบ Grid Visualizer")
 
@@ -1868,20 +1865,16 @@ elif page == t["page_smart_name"]:
 
     if mesh_obj is not None:
         try:
-            # เรียกใช้ฟังก์ชันโดยส่งค่าตามที่ระบบเดิมรองรับ (ตัด num_parts ออกเพื่อแก้ปัญหา unexpected keyword argument)
-            foam_h_mm = foam_h_cm  # ความสูงโฟมเป็นมิลลิเมตร
-            
+            foam_h_mm = foam_h_cm
             fig_visualizer = create_foam_grid_visualizer(
                 mesh=mesh_obj,
                 foam_height_mm=foam_h_mm
             )
-            
             if fig_visualizer:
                 st.plotly_chart(fig_visualizer, use_container_width=True)
             else:
                 st.info("💡 ระบบกำลังประมวลผลการแสดงผล 3D กรุณาตรวจสอบข้อมูลชิ้นงานอีกครั้ง")
-                
         except Exception as e:
             st.error(f"⚠️ เกิดข้อผิดพลาดในการเรนเดอร์โมเดล 3D: {e}")
     else:
-        st.warning("⚠️ ยังไม่พบไฟล์โมเดล 3D ในระบบ กรุณาอัปโหลดไฟล์โมเดล 3D ที่หน้าแรก (Analyzer) ก่อนใช้งานฟังก์ชันนี้")
+        st.warning("⚠️ ยังไม่พบไฟล์โมเดล 3D ในระบบ กรุณาอัปโหลดไฟล์โมเดล 3D ที่หน้าแรก (Analyzer) ก่อนใช้งานฟังก์ชันนี้ครับ")
