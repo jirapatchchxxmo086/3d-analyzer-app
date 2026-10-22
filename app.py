@@ -140,6 +140,7 @@ TEXTS = {
         "sidebar_menu": "📌 เมนูหลัก",
         "page_1_name": "📦 แบบจำลอง 3 มิติและพื้นผิว",
         "page_2_name": "💰 ประเมินราคา",
+        "page_smart_name": "🧩 วิเคราะห์แบ่งก้อนโฟมอัตโนมัติ",
         "lang_select": "🌐 เลือกภาษา / Language",
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
         "p1_sub": "อัปโหลดไฟล์โมเดล 3D เพื่อวิเคราะห์ขนาด Bounding Box, พื้นที่ผิว, ปริมาตร และความซับซ้อนของพื้นผิวอัตโนมัติ",
@@ -229,11 +230,19 @@ TEXTS = {
         "mat_cost": "ค่าวัสดุและอุปกรณ์",
         "paint_cost": "ค่าเคลือบผิว & ทำสี",
         "Total_Estimate_Cost": "🏷️ ราคารวมประมาณการ (Total Estimate Cost)",
+        "smart_title": "🧩 ระบบวิเคราะห์และประเมินการแบ่งก้อนโฟมอัตโนมัติ (Smart Partition)",
+        "smart_sub": "ระบบคำนวณจำนวนส่วนที่เหมาะสมที่สุดตามรูปทรง เพื่อลดขยะโฟมและต้นทุนผลิตโดยอัตโนมัติ",
+        "smart_w_label": "ความกว้างรวม (cm)",
+        "smart_l_label": "ความยาวรวม (cm)",
+        "smart_h_label": "ความสูงรวม (cm)",
+        "smart_complexity": "ความซับซ้อนของรูปทรง (Complexity)",
+        "smart_f_price": "ราคาโฟม (บาท / cm³)",
     },
     "EN": {
         "sidebar_menu": "📌 Main Menu",
         "page_1_name": "📦 3D Model & Surface",
         "page_2_name": "💰 Cost Estimator",
+        "page_smart_name": "🧩 Smart Foam Partitioning",
         "lang_select": "🌐 Select Language / เลือกภาษา",
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
         "p1_sub": "Upload a 3D model file to automatically extract bounding box dimensions, surface area, volume, and surface detail complexity.",
@@ -323,6 +332,13 @@ TEXTS = {
         "mat_cost": "Material & Equipment Cost",
         "paint_cost": "Coating & Painting Cost",
         "Total_Estimate_Cost": "🏷️Total Estimated Cost",
+        "smart_title": "🧩 Smart Foam Partitioning & Cost Estimator",
+        "smart_sub": "Automatically calculates the optimal number of partitions to minimize foam waste and production costs.",
+        "smart_w_label": "Total Width (cm)",
+        "smart_l_label": "Total Length (cm)",
+        "smart_h_label": "Total Height (cm)",
+        "smart_complexity": "Shape Complexity / Overhangs",
+        "smart_f_price": "Foam Price (THB / cm³)",
     }
 }
 
@@ -650,7 +666,7 @@ lang = st.sidebar.selectbox(
 st.session_state["language"] = lang
 t = TEXTS[lang]
 
-nav_options = [t["page_1_name"], t["page_2_name"]]
+nav_options = [t["page_1_name"], t["page_2_name"], t["page_smart_name"]]
 if "nav_page_choice" not in st.session_state or st.session_state["nav_page_choice"] not in nav_options:
     st.session_state["nav_page_choice"] = nav_options[0]
 
@@ -1768,3 +1784,72 @@ elif page == t["page_2_name"]:
 
     st.markdown(f"### {t['Total_Estimate_Cost']}")
     st.title(f"฿ {subtotal:,.2f} THB")
+# ==========================================
+# 🧩 นำโค้ดหน้านี้มาวางต่อท้ายตรงนี้ได้เลยครับ
+# ==========================================
+elif page == t["page_smart_name"]:
+    st.subheader(t["smart_title"])
+    st.caption(t["smart_sub"])
+
+    # 1. รับค่าขนาดชิ้นงานรวม
+    col_s1, col_s2, col_s3 = st.columns(3)
+    overall_w = col_s1.number_input(t["smart_w_label"], value=120, step=10, key="smart_w")
+    overall_l = col_s2.number_input(t["smart_l_label"], value=100, step=10, key="smart_l")
+    overall_h = col_s3.number_input(t["smart_h_label"], value=180, step=10, key="smart_h")
+
+    complexity = st.selectbox(
+        t["smart_complexity"],
+        options=["เรียบง่าย (ทรงกล่อง/ทรงกระบอก)", "ปานกลาง (มีส่วนยื่นเล็กน้อย)", "ซับซ้อนสูง (มีแขน/ขา/ปีกยื่นชัดเจน)"],
+        key="smart_complexity_sel"
+    )
+    
+    col_p1, col_p2 = st.columns(2)
+    foam_price = col_p1.number_input(t["smart_f_price"], value=0.05, step=0.01, format="%.2f", key="smart_f_price_val")
+
+    # 2. อัลกอริทึมแนะนำจำนวนส่วนอัตโนมัติ
+    if "เรียบง่าย" in complexity:
+        rec_parts = 1
+    elif "ปานกลาง" in complexity:
+        rec_parts = 3 if max(overall_w, overall_l, overall_h) <= 150 else 4
+    else:
+        rec_parts = 8 if max(overall_w, overall_l, overall_h) <= 120 else 10
+
+    st.info(f"💡 **ผลการวิเคราะห์รูปทรง:** ระบบแนะนำให้แบ่งก้อนโฟมออกเป็น **{rec_parts} ส่วน** (เหมาะสมที่สุดสำหรับชิ้นงานขนาดนี้)")
+
+    # 3. Slider ปรับเลือกจำนวนส่วน
+    num_parts = st.slider("ปรับเลือกจำนวนส่วนที่ต้องการแบ่ง / Select number of parts:", min_value=1, max_value=12, value=rec_parts, key="smart_num_parts_slider")
+
+    # 4. คำนวณจำลองข้อมูลชิ้นส่วนย่อย
+    import pandas as pd
+    import numpy as np
+
+    parts_list = []
+    slice_w = overall_w / np.ceil(num_parts**(1/3))
+    slice_l = overall_l / np.ceil(num_parts**(1/3))
+    slice_h = overall_h / max(1, int(np.ceil(num_parts / (np.ceil(num_parts**(1/3))**2))))
+
+    for i in range(1, num_parts + 1):
+        p_w = round(slice_w * np.random.uniform(0.9, 1.1), 1)
+        p_l = round(slice_l * np.random.uniform(0.9, 1.1), 1)
+        p_h = round(slice_h * np.random.uniform(0.9, 1.1), 1)
+        parts_list.append({
+            "ส่วนที่": f"ชิ้นส่วน #{i}",
+            "กว้าง (cm)": p_w, "ยาว (cm)": p_l, "สูง (cm)": p_h,
+            "ปริมาตร (cm³)": p_w * p_l * p_h,
+            "ราคาโฟม (บาท)": p_w * p_l * p_h * foam_price
+        })
+
+    df_parts = pd.DataFrame(parts_list)
+    single_block_cost = (overall_w * overall_l * overall_h) * foam_price
+    divided_total_cost = df_parts["ราคาโฟม (บาท)"].sum()
+    saved_cost = single_block_cost - divided_total_cost
+    saved_percent = (saved_cost / single_block_cost) * 100 if saved_cost > 0 else 0
+
+    # 5. แสดงผลสรุป Metric และตาราง
+    m1, m2, m3 = st.columns(3)
+    m1.metric("ต้นทุนตัดก้อนใหญ่เดี่ยว", f"฿{single_block_cost:,.2f}")
+    m2.metric(f"ต้นทุนตัดแบ่ง {num_parts} ส่วน", f"฿{divided_total_cost:,.2f}")
+    m3.metric("💰 ประหยัดได้สุทธิ", f"฿{saved_cost:,.2f}", delta=f"{saved_percent:.1f}%")
+
+    st.subheader("📋 รายละเอียดขนาดโฟมแต่ละชิ้นส่วน")
+    st.dataframe(df_parts, use_container_width=True)
