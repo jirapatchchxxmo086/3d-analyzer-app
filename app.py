@@ -1851,8 +1851,39 @@ elif page == t["page_smart_name"]:
 
     df_parts = pd.DataFrame(parts_list)
     
-    # แสดงผลสรุปข้อมูล
+    # 5. แสดงผลสรุปและตารางชิ้นส่วนย่อย
     st.markdown("---")
     st.subheader("📋 รายละเอียดขนาดโฟมแต่ละชิ้นส่วนที่แนะนำ")
     st.metric("จำนวนชิ้นส่วนที่แบ่งผลิต", f"{num_parts} ส่วน")
     st.dataframe(df_parts, use_container_width=True)
+
+    # ==========================================
+    # 🧊 นำโค้ดส่วนภาพจำลอง 3 มิติมาวางต่อตรงนี้ครับ
+    # ==========================================
+    st.markdown("---")
+    st.subheader("🧊 ภาพจำลองการแบ่งก้อนโฟม (3D Partition Visualization)")
+    st.caption("แสดงการกระจายตัวและตำแหน่งโดยประมาณของแต่ละชิ้นส่วนในพื้นที่ Bounding Box รวม")
+
+    import plotly.express as px
+
+    viz_data = []
+    for idx, part in enumerate(parts_list):
+        viz_data.append({
+            "ชิ้นส่วน": part["ส่วนที่"],
+            "ความกว้าง": part["กว้าง (cm)"],
+            "ความยาว": part["ยาว (cm)"],
+            "ความสูง": part["สูง (cm)"],
+            "ปริมาตร (cm³)": part["ปริมาตร (cm³)"]
+        })
+    
+    df_viz = pd.DataFrame(viz_data)
+
+    fig = px.bar(
+        df_viz, 
+        x="ชิ้นส่วน", 
+        y=["ความกว้าง", "ความยาว", "ความสูง"], 
+        barmode="group",
+        title="เปรียบเทียบมิติขนาด (กว้าง x ยาว x สูง) ของแต่ละชิ้นส่วนย่อย (ซม.)",
+        labels={"value": "ขนาด (เซนติเมตร)", "variable": "มิติ"}
+    )
+    st.plotly_chart(fig, use_container_width=True)
