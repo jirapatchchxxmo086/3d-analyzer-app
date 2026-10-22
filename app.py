@@ -1865,8 +1865,15 @@ elif page == t["page_smart_name"]:
 
     if mesh_obj is not None:
         try:
-            # เรียกใช้ฟังก์ชันด้วยตัวแปร mesh_obj เพียงอย่างเดียวตามโครงสร้างฟังก์ชันเดิม
-            fig_visualizer = create_foam_grid_visualizer(mesh_obj)
+            # ดึงค่าความยาว (Y) และความสูง (Z ในหน่วยมิลลิเมตร) ส่งเข้าไปยังฟังก์ชัน
+            y_val_mm = float(st.session_state.get('length_y_mm', box_l * 10.0))
+            z_val_mm = foam_h_cm * 10.0  # แปลงความสูงโฟมจากซม. เป็นมม.
+
+            fig_visualizer = create_foam_grid_visualizer(
+                mesh=mesh_obj,
+                y_mm=y_val_mm,
+                z_mm=z_val_mm
+            )
             
             if fig_visualizer:
                 st.plotly_chart(fig_visualizer, use_container_width=True)
