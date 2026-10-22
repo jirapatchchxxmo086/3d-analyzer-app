@@ -1861,24 +1861,42 @@ elif page == t["page_smart_name"]:
     # 🧊 นำโค้ดส่วนภาพจำลอง 3 มิติมาวางต่อตรงนี้ครับ
     # ==========================================
     st.markdown("---")
-    st.subheader("🧊 ภาพจำลองการแบ่งชิ้นส่วนโฟม (Partitioned Parts View)")
-    st.caption("แสดงมิติขนาดและปริมาตรของแต่ละชิ้นส่วนย่อยที่ถูกแบ่งตามจำนวนพาร์ท")
+    st.subheader("🧊 ภาพจำลอง 3 มิติการแบ่งก้อนโฟม (3D Partition Model)")
+    st.caption("แสดงตำแหน่งและการกระจายตัวของแต่ละชิ้นส่วนในพื้นที่ 3 มิติ (สามารถคลิกหมุนดูรอบๆ ได้)")
 
-    # สร้างการ์ดแสดงผลทีละชิ้นส่วน
-    cols_per_row = 3
-    for i in range(0, len(parts_list), cols_per_row):
-        row_cols = st.columns(cols_per_row)
-        for j in range(cols_per_row):
-            if i + j < len(parts_list):
-                part = parts_list[i + j]
-                with row_cols[j]:
-                    st.markdown(f"""
-                    <div style="padding: 15px; border: 1px solid #ddd; border-radius: 10px; background-color: #f9f9f9; margin-bottom: 10px;">
-                        <h4 style="margin: 0 0 10px 0; color: #1f77b4;">📦 {part['ส่วนที่']}</h4>
-                        <p style="margin: 4px 0;"><b>กว้าง:</b> {part['กว้าง (cm)']} ซม.</p>
-                        <p style="margin: 4px 0;"><b>ยาว:</b> {part['ยาว (cm)']} ซม.</p>
-                        <p style="margin: 4px 0;"><b>สูง:</b> {part['สูง (cm)']} ซม.</p>
-                        <hr style="margin: 8px 0;">
-                        <p style="margin: 4px 0; color: #333;"><b>ปริมาตร:</b> {part['ปริมาตร (cm³)']:,.2f} cm³</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+    import plotly.graph_objects as go
+    import numpy as np
+
+    fig = go.Figure()
+
+    # คำนวณตำแหน่งกระจายชิ้นส่วนแบบ Exploded View 3D
+    cols_grid = int(np.ceil(np.cbrt(num_parts)))
+    for idx, part in enumerate(parts_list):
+        # คำนวณพิกัดตำแหน่งจำลองในพื้นที่ 3D
+        pos_x = (idx % cols_grid) * (box_w / max(1, cols_grid))
+        pos_y = ((idx // cols_grid) % cols_grid) * (box_l / max(1, cols_grid))
+        pos_z = (idx // (cols_grid * cols_grid)) * (box_h / 2)
+
+        fig.add_trace(go.Scatter3d(
+            x=[pos_x, pos_x + part['กว้าง (cm)']],
+            y=[pos_y, pos_y + part['ยาว (cm)']],
+            z=[pos_z, pos_z + part['สูง (cm)']],
+            mode='text+markers',
+            marker=dict(size=8, color=idx, colorscale='Viridis'),
+            text=[f"", f"<b>{part['ส่วนที่']}</b><br>กว้าง: {part['กว้าง (cm)']}ซม.<br>ยาว: {part['ยาว (cm)']}ซม.<br>สูง: {part['สูง (cm)']}ซม."],
+            textposition="top center",
+            name=part['ส่วนที่']
+        ))
+
+    fig.update_layout(
+        title="โมเดลจำลองการตัดแบ่งชิ้นส่วน 3 มิติ (3D Exploded View)",
+        scene=dict(
+            xaxis_title='แกน X (ความกว้าง ซม.)',
+            yaxis_title='แกน Y (ความยาว ซม.)',
+            zaxis_title='แกน Z (ความสูง ซม.)'
+        ),
+        margin=dict(l=0, r=0, b=0, t=40),
+        height=500
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
