@@ -1861,29 +1861,24 @@ elif page == t["page_smart_name"]:
     # 🧊 นำโค้ดส่วนภาพจำลอง 3 มิติมาวางต่อตรงนี้ครับ
     # ==========================================
     st.markdown("---")
-    st.subheader("🧊 ภาพจำลองการแบ่งก้อนโฟม (3D Partition Visualization)")
-    st.caption("แสดงการกระจายตัวและตำแหน่งโดยประมาณของแต่ละชิ้นส่วนในพื้นที่ Bounding Box รวม")
+    st.subheader("🧊 ภาพจำลองการแบ่งชิ้นส่วนโฟม (Partitioned Parts View)")
+    st.caption("แสดงมิติขนาดและปริมาตรของแต่ละชิ้นส่วนย่อยที่ถูกแบ่งตามจำนวนพาร์ท")
 
-    import plotly.express as px
-
-    viz_data = []
-    for idx, part in enumerate(parts_list):
-        viz_data.append({
-            "ชิ้นส่วน": part["ส่วนที่"],
-            "ความกว้าง": part["กว้าง (cm)"],
-            "ความยาว": part["ยาว (cm)"],
-            "ความสูง": part["สูง (cm)"],
-            "ปริมาตร (cm³)": part["ปริมาตร (cm³)"]
-        })
-    
-    df_viz = pd.DataFrame(viz_data)
-
-    fig = px.bar(
-        df_viz, 
-        x="ชิ้นส่วน", 
-        y=["ความกว้าง", "ความยาว", "ความสูง"], 
-        barmode="group",
-        title="เปรียบเทียบมิติขนาด (กว้าง x ยาว x สูง) ของแต่ละชิ้นส่วนย่อย (ซม.)",
-        labels={"value": "ขนาด (เซนติเมตร)", "variable": "มิติ"}
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    # สร้างการ์ดแสดงผลทีละชิ้นส่วน
+    cols_per_row = 3
+    for i in range(0, len(parts_list), cols_per_row):
+        row_cols = st.columns(cols_per_row)
+        for j in range(cols_per_row):
+            if i + j < len(parts_list):
+                part = parts_list[i + j]
+                with row_cols[j]:
+                    st.markdown(f"""
+                    <div style="padding: 15px; border: 1px solid #ddd; border-radius: 10px; background-color: #f9f9f9; margin-bottom: 10px;">
+                        <h4 style="margin: 0 0 10px 0; color: #1f77b4;">📦 {part['ส่วนที่']}</h4>
+                        <p style="margin: 4px 0;"><b>กว้าง:</b> {part['กว้าง (cm)']} ซม.</p>
+                        <p style="margin: 4px 0;"><b>ยาว:</b> {part['ยาว (cm)']} ซม.</p>
+                        <p style="margin: 4px 0;"><b>สูง:</b> {part['สูง (cm)']} ซม.</p>
+                        <hr style="margin: 8px 0;">
+                        <p style="margin: 4px 0; color: #333;"><b>ปริมาตร:</b> {part['ปริมาตร (cm³)']:,.2f} cm³</p>
+                    </div>
+                    """, unsafe_allow_html=True)
