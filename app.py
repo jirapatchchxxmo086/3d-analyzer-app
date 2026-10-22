@@ -1865,15 +1865,14 @@ elif page == t["page_smart_name"]:
 
     if mesh_obj is not None:
         try:
-            foam_h_mm = foam_h_cm
-            fig_visualizer = create_foam_grid_visualizer(
-                mesh=mesh_obj,
-                foam_height_mm=foam_h_mm
-            )
+            # เรียกใช้ฟังก์ชันด้วยตัวแปร mesh_obj เพียงอย่างเดียวตามโครงสร้างฟังก์ชันเดิม
+            fig_visualizer = create_foam_grid_visualizer(mesh_obj)
+            
             if fig_visualizer:
                 st.plotly_chart(fig_visualizer, use_container_width=True)
             else:
                 st.info("💡 ระบบกำลังประมวลผลการแสดงผล 3D กรุณาตรวจสอบข้อมูลชิ้นงานอีกครั้ง")
+                
         except Exception as e:
             st.error(f"⚠️ เกิดข้อผิดพลาดในการเรนเดอร์โมเดล 3D: {e}")
     else:
