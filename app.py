@@ -1862,81 +1862,30 @@ elif page == t["page_smart_name"]:
     # ==========================================
     st.markdown("---")
     st.subheader("🧊 ภาพจำลองการแบ่งก้อนโฟมจากโมเดล 3D จริง")
-    st.caption("ดึงโครงสร้าง Mesh 3D จากไฟล์ที่อัปโหลดในหน้าแรก มาจำลองการแบ่งพาร์ท")
+    st.caption("แสดงผลการตัดแบ่งชิ้นส่วน 3 มิติจากไฟล์ต้นฉบับโดยใช้ระบบ Grid Visualizer")
 
-    import plotly.graph_objects as go
-    import numpy as np
+    # ตรวจสอบว่ามีไฟล์ 3D ที่อัปโหลดและบันทึกไว้ใน session_state หรือไม่
+    # (โดยปกติมักเก็บไว้ในชื่อ 'mesh', 'uploaded_file' หรือผ่านฟังก์ชันของโปรเจกต์)
+    mesh_obj = st.session_state.get("mesh", None)
 
-    fig = go.Figure()
-
-    # ตรวจสอบว่ามีข้อมูล Mesh 3D อยู่ใน session_state หรือไม่
-    has_mesh = False
-    if "mesh_vertices" in st.session_state and "mesh_faces" in st.session_state:
-        vertices = st.session_state["mesh_vertices"]
-        faces = st.session_state["mesh_faces"]
-        
-        if len(vertices) > 0 and len(faces) > 0:
-            has_mesh = True
-            # แปลงพิกัดหน่วย mm เป็น cm
-            vx = vertices[:, 0] / 10.0
-            vy = vertices[:, 1] / 10.0
-            vz = vertices[:, 2] / 10.0
+    if mesh_obj is not None:
+        try:
+            # เรียกใช้ฟังก์ชันสร้างภาพจำลอง Grid Visualizer ที่มีอยู่แล้วในโปรเจกต์ของคุณ
+            # (กำหนดความสูงโฟมจาก Slider ที่แปลงเป็นมิลลิเมตร: foam_h_mm = foam_h_cm * 10)
+            foam_h_mm = foam_h_cm
             
-            i_idx = faces[:, 0]
-            j_idx = faces[:, 1]
-            k_idx = faces[:, 2]
-
-            # เรนเดอร์ไฟล์โมเดล 3D จริง
-            fig.add_trace(go.Mesh3d(
-                x=vx, y=vy, z=vz,
-                i=i_idx, j=j_idx, k=k_idx,
-                color='#2ecc71',
-                opacity=0.8,
-                name="โมเดลชิ้นงานจริง (3D Model)"
-            ))
-
-    # กรณีไม่มี Mesh ให้วาดรูปทรงจำลองชั่วคราว
-    if not has_mesh:
-        st.warning("⚠️ ไม่พบข้อมูลโครงสร้าง Mesh 3D จากหน้าแรก ระบบกำลังแสดงรูปทรงจำลอง Bounding Box ชั่วคราว")
-        u = np.linspace(0, 2 * np.pi, 20)
-        v = np.linspace(0, np.pi, 20)
-        mesh_x = (box_w / 3) * np.outer(np.cos(u), np.sin(v)) + (box_w / 2)
-        mesh_y = (box_l / 3) * np.outer(np.sin(u), np.sin(v)) + (box_l / 2)
-        mesh_z = (box_h / 2.5) * np.outer(np.ones(np.size(u)), np.cos(v)) + (box_h / 2)
-        fig.add_trace(go.Surface(x=mesh_x, y=mesh_y, z=mesh_z, colorscale='Greens', opacity=0.7, name="โมเดลจำลอง"))
-
-    # วาดกรอบ Bounding Box และระนาบตัดโฟมตามจำนวนส่วน (num_parts)
-    fig.add_trace(go.Scatter3d(
-        x=[0, box_w, box_w, 0, 0, 0, box_w, box_w, 0, 0, box_w, box_w, box_w, box_w, 0, 0],
-        y=[0, 0, box_l, box_l, 0, 0, 0, box_l, box_l, 0, 0, 0, box_l, box_l, box_l, box_l],
-        z=[0, 0, 0, 0, 0, box_h, box_h, box_h, box_h, box_h, box_h, 0, 0, box_h, box_h, 0],
-        mode='lines',
-        line=dict(color='red', width=4),
-        name="Bounding Box รวม"
-    ))
-
-    # จำลองเส้นระนาบตัดแบ่งโฟมตามจำนวนพาร์ท
-    if num_parts > 1:
-        z_cuts = np.linspace(0, box_h, num_parts + 1)[1:-1]
-        for idx, z_val in enumerate(z_cuts):
-            fig.add_trace(go.Scatter3d(
-                x=[0, box_w, box_w, 0, 0],
-                y=[0, 0, box_l, box_l, 0],
-                z=[z_val, z_val, z_val, z_val, z_val],
-                mode='lines',
-                line=dict(color='blue', width=3, dash='dash'),
-                name=f"รอยตัดส่วนที่ {idx+1}"
-            ))
-
-    fig.update_layout(
-        title="มุมมองจำลองการตัดแบ่งโฟม 3 มิติ (Real 3D Mesh Partitioning)",
-        scene=dict(
-            xaxis_title='ความกว้าง X (ซม.)',
-            yaxis_title='ความยาว Y (ซม.)',
-            zaxis_title='ความสูง Z (ซม.)'
-        ),
-        margin=dict(l=0, r=0, b=0, t=40),
-        height=600
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
+            fig_visualizer = create_foam_grid_visualizer(
+                mesh=mesh_obj,
+                num_parts=num_parts,
+                foam_height_mm=foam_h_mm
+            )
+            
+            if fig_visualizer:
+                st.plotly_chart(fig_visualizer, use_container_width=True)
+            else:
+                st.info("💡 ระบบกำลังประมวลผลการแสดงผล 3D กรุณาตรวจสอบข้อมูลชิ้นงานอีกครั้ง")
+                
+        except Exception as e:
+            st.error(f"⚠️ เกิดข้อผิดพลาดในการเรนเดอร์โมเดล 3D: {e}")
+    else:
+        st.warning("⚠️ ยังไม่พบไฟล์โมเดล 3D ในระบบ กรุณาอัปโหลดไฟล์โมเดล 3D ที่หน้าแรก (Analyzer) ก่อนใช้งานฟังก์ชันนี้ครับ")
