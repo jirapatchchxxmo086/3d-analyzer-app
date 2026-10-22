@@ -1861,42 +1861,47 @@ elif page == t["page_smart_name"]:
     # 🧊 นำโค้ดส่วนภาพจำลอง 3 มิติมาวางต่อตรงนี้ครับ
     # ==========================================
     st.markdown("---")
-    st.subheader("🧊 ภาพจำลอง 3 มิติการแบ่งก้อนโฟม (3D Partition Model)")
-    st.caption("แสดงตำแหน่งและการกระจายตัวของแต่ละชิ้นส่วนในพื้นที่ 3 มิติ (สามารถคลิกหมุนดูรอบๆ ได้)")
+    st.subheader("🧊 ภาพจำลอง 3 มิติ: ตัวโมเดลชิ้นงานและบล็อกโฟม")
+    st.caption("แสดงรูปทรง 3 มิติของชิ้นงานจริงอยู่ภายในพื้นที่ Bounding Box (สามารถหมุนและซูมดูได้)")
 
     import plotly.graph_objects as go
     import numpy as np
 
     fig = go.Figure()
 
-    # คำนวณตำแหน่งกระจายชิ้นส่วนแบบ Exploded View 3D
-    cols_grid = int(np.ceil(np.cbrt(num_parts)))
-    for idx, part in enumerate(parts_list):
-        # คำนวณพิกัดตำแหน่งจำลองในพื้นที่ 3D
-        pos_x = (idx % cols_grid) * (box_w / max(1, cols_grid))
-        pos_y = ((idx // cols_grid) % cols_grid) * (box_l / max(1, cols_grid))
-        pos_z = (idx // (cols_grid * cols_grid)) * (box_h / 2)
+    # 1. จำลองรูปทรงโมเดล 3 มิติ (เช่น รูปทรงประติมากรรมตรงกลาง)
+    u = np.linspace(0, 2 * np.pi, 20)
+    v = np.linspace(0, np.pi, 20)
+    mesh_x = (box_w / 3) * np.outer(np.cos(u), np.sin(v)) + (box_w / 2)
+    mesh_y = (box_l / 3) * np.outer(np.sin(u), np.sin(v)) + (box_l / 2)
+    mesh_z = (box_h / 2.5) * np.outer(np.ones(np.size(u)), np.cos(v)) + (box_h / 2)
 
-        fig.add_trace(go.Scatter3d(
-            x=[pos_x, pos_x + part['กว้าง (cm)']],
-            y=[pos_y, pos_y + part['ยาว (cm)']],
-            z=[pos_z, pos_z + part['สูง (cm)']],
-            mode='text+markers',
-            marker=dict(size=8, color=idx, colorscale='Viridis'),
-            text=[f"", f"<b>{part['ส่วนที่']}</b><br>กว้าง: {part['กว้าง (cm)']}ซม.<br>ยาว: {part['ยาว (cm)']}ซม.<br>สูง: {part['สูง (cm)']}ซม."],
-            textposition="top center",
-            name=part['ส่วนที่']
-        ))
+    fig.add_trace(go.Surface(
+        x=mesh_x, y=mesh_y, z=mesh_z,
+        colorscale='Greens',
+        opacity=0.7,
+        name="โมเดล 3 มิติ (Workpiece)"
+    ))
+
+    # 2. วาดกรอบ Bounding Box ขอบเขตชิ้นงานรวม
+    fig.add_trace(go.Scatter3d(
+        x=[0, box_w, box_w, 0, 0, 0, box_w, box_w, 0, 0, box_w, box_w, box_w, box_w, 0, 0],
+        y=[0, 0, box_l, box_l, 0, 0, 0, box_l, box_l, 0, 0, 0, box_l, box_l, box_l, box_l],
+        z=[0, 0, 0, 0, 0, box_h, box_h, box_h, box_h, box_h, box_h, 0, 0, box_h, box_h, 0],
+        mode='lines',
+        line=dict(color='rgba(100, 100, 100, 0.5)', width=3, dash='dash'),
+        name="Bounding Box รวม"
+    ))
 
     fig.update_layout(
-        title="โมเดลจำลองการตัดแบ่งชิ้นส่วน 3 มิติ (3D Exploded View)",
+        title="มุมมองจำลอง 3 มิติ (3D Sculpture & Bounding Box View)",
         scene=dict(
-            xaxis_title='แกน X (ความกว้าง ซม.)',
-            yaxis_title='แกน Y (ความยาว ซม.)',
-            zaxis_title='แกน Z (ความสูง ซม.)'
+            xaxis_title='ความกว้าง (ซม.)',
+            yaxis_title='ความยาว (ซม.)',
+            zaxis_title='ความสูง (ซม.)'
         ),
         margin=dict(l=0, r=0, b=0, t=40),
-        height=500
+        height=550
     )
 
     st.plotly_chart(fig, use_container_width=True)
