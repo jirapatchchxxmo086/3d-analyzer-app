@@ -1791,42 +1791,53 @@ elif page == t["page_smart_name"]:
     st.subheader(t["smart_title"])
     st.caption(t["smart_sub"])
 
-    # 1. รับค่าขนาดชิ้นงานรวม
-    col_s1, col_s2, col_s3 = st.columns(3)
-    overall_w = col_s1.number_input(t["smart_w_label"], value=120, step=10, key="smart_w")
-    overall_l = col_s2.number_input(t["smart_l_label"], value=100, step=10, key="smart_l")
-    overall_h = col_s3.number_input(t["smart_h_label"], value=180, step=10, key="smart_h")
+    # 1. ดึงขนาด Bounding Box 3D จากหน้าแรก (แปลงหน่วยจาก มม. เป็น ซม.)
+    box_w = float(st.session_state.get('width_x_mm', 1200)) / 10.0 if 'width_x_mm' in st.session_state else 120.0
+    box_l = float(st.session_state.get('length_y_mm', 1000)) / 10.0 if 'length_y_mm' in st.session_state else 100.0
+    box_h = float(st.session_state.get('height_z_mm', 1800)) / 10.0 if 'height_z_mm' in st.session_state else 180.0
+
+    st.info(f"📦 **Bounding Box ของชิ้นงาน 3 มิติ (จากหน้าแรก):** กว้าง (X): **{box_w:.1f} ซม.** | ยาว (Y): **{box_l:.1f} ซม.** | สูง (Z): **{box_h:.1f} ซม.**")
+
+    # 2. ตั้งค่าขนาดโฟมมาตรฐานและสไลเดอร์ความสูง
+    st.markdown("---")
+    st.subheader("📏 กำหนดขนาดแผ่นโฟมดิบสำหรับการผลิต")
+    
+    col_f1, col_f2 = st.columns(2)
+    foam_width_cm = col_f1.metric("ความกว้างแผ่นโฟมมาตรฐาน", "60 ซม. (600 mm)")
+    foam_length_cm = col_f2.metric("ความยาวแผ่นโฟมมาตรฐาน", "120 ซม. (1200 mm)")
+    
+    # สไลเดอร์ปรับความสูงโฟม 1 - 3 เมตร (100 - 300 ซม.)
+    foam_height_cm = st.slider("เลือกความสูงของแผ่นโฟม (เมตร):", min_value=1.0, max_value=3.0, value=1.8, step=0.1, format="%.1f เมตร")
+    foam_h_cm = foam_height_cm * 100.0  # แปลงเป็นซม. สำหรับคำนวณ
 
     complexity = st.selectbox(
         t["smart_complexity"],
         options=["เรียบง่าย (ทรงกล่อง/ทรงกระบอก)", "ปานกลาง (มีส่วนยื่นเล็กน้อย)", "ซับซ้อนสูง (มีแขน/ขา/ปีกยื่นชัดเจน)"],
         key="smart_complexity_sel"
     )
-    
-    col_p1, col_p2 = st.columns(2)
-    foam_price = col_p1.number_input(t["smart_f_price"], value=0.05, step=0.01, format="%.2f", key="smart_f_price_val")
 
-    # 2. อัลกอริทึมแนะนำจำนวนส่วนอัตโนมัติ
+    # 3. อัลกอริทึมแนะนำจำนวนส่วนอัตโนมัติ (อิงจากขนาด Bounding Box เทียบกับขนาดโฟม)
+    max_box_dim = max(box_w, box_l, box_h)
     if "เรียบง่าย" in complexity:
         rec_parts = 1
     elif "ปานกลาง" in complexity:
-        rec_parts = 3 if max(overall_w, overall_l, overall_h) <= 150 else 4
+        rec_parts = 3 if max_box_dim <= 150 else 4
     else:
-        rec_parts = 8 if max(overall_w, overall_l, overall_h) <= 120 else 10
+        rec_parts = 8 if max_box_dim <= 120 else 10
 
     st.info(f"💡 **ผลการวิเคราะห์รูปทรง:** ระบบแนะนำให้แบ่งก้อนโฟมออกเป็น **{rec_parts} ส่วน** (เหมาะสมที่สุดสำหรับชิ้นงานขนาดนี้)")
 
-    # 3. Slider ปรับเลือกจำนวนส่วน
+    # 4. Slider ปรับเลือกจำนวนส่วน
     num_parts = st.slider("ปรับเลือกจำนวนส่วนที่ต้องการแบ่ง / Select number of parts:", min_value=1, max_value=12, value=rec_parts, key="smart_num_parts_slider")
 
-    # 4. คำนวณจำลองข้อมูลชิ้นส่วนย่อย
+    # 5. คำนวณจำลองข้อมูลชิ้นส่วนย่อย
     import pandas as pd
     import numpy as np
 
     parts_list = []
-    slice_w = overall_w / np.ceil(num_parts**(1/3))
-    slice_l = overall_l / np.ceil(num_parts**(1/3))
-    slice_h = overall_h / max(1, int(np.ceil(num_parts / (np.ceil(num_parts**(1/3))**2))))
+    slice_w = box_w / np.ceil(num_parts**(1/3))
+    slice_l = box_l / np.ceil(num_parts**(1/3))
+    slice_h = box_h / max(1, int(np.ceil(num_parts / (np.ceil(num_parts**(1/3))**2))))
 
     for i in range(1, num_parts + 1):
         p_w = round(slice_w * np.random.uniform(0.9, 1.1), 1)
@@ -1835,21 +1846,13 @@ elif page == t["page_smart_name"]:
         parts_list.append({
             "ส่วนที่": f"ชิ้นส่วน #{i}",
             "กว้าง (cm)": p_w, "ยาว (cm)": p_l, "สูง (cm)": p_h,
-            "ปริมาตร (cm³)": p_w * p_l * p_h,
-            "ราคาโฟม (บาท)": p_w * p_l * p_h * foam_price
+            "ปริมาตร (cm³)": round(p_w * p_l * p_h, 2)
         })
 
     df_parts = pd.DataFrame(parts_list)
-    single_block_cost = (overall_w * overall_l * overall_h) * foam_price
-    divided_total_cost = df_parts["ราคาโฟม (บาท)"].sum()
-    saved_cost = single_block_cost - divided_total_cost
-    saved_percent = (saved_cost / single_block_cost) * 100 if saved_cost > 0 else 0
-
-    # 5. แสดงผลสรุป Metric และตาราง
-    m1, m2, m3 = st.columns(3)
-    m1.metric("ต้นทุนตัดก้อนใหญ่เดี่ยว", f"฿{single_block_cost:,.2f}")
-    m2.metric(f"ต้นทุนตัดแบ่ง {num_parts} ส่วน", f"฿{divided_total_cost:,.2f}")
-    m3.metric("💰 ประหยัดได้สุทธิ", f"฿{saved_cost:,.2f}", delta=f"{saved_percent:.1f}%")
-
-    st.subheader("📋 รายละเอียดขนาดโฟมแต่ละชิ้นส่วน")
+    
+    # แสดงผลสรุปข้อมูล
+    st.markdown("---")
+    st.subheader("📋 รายละเอียดขนาดโฟมแต่ละชิ้นส่วนที่แนะนำ")
+    st.metric("จำนวนชิ้นส่วนที่แบ่งผลิต", f"{num_parts} ส่วน")
     st.dataframe(df_parts, use_container_width=True)
