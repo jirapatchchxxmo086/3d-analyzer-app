@@ -51,6 +51,11 @@ def _face_stats(vertices, faces):
     return tri.min(axis=1), tri.max(axis=1), tri.mean(axis=1)
 
 
+def _face_areas(vertices, faces):
+    v = np.asarray(vertices, dtype=np.float32)[np.asarray(faces)]
+    return 0.5 * np.linalg.norm(np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1)
+
+
 def _make_group(idx, tmin, tmax):
     return {
         "idx": idx,
@@ -184,11 +189,12 @@ def build_parts(vertices, faces, method, foam_h_mm, target_parts=None, margin_mm
         want = recommended if target_parts is None else target_parts
         groups = split_auto(tmin, tmax, centers, max_dims, want, stop_when_fit=False)
 
+    areas = _face_areas(vertices, faces)
     parts = []
     for g in groups:
         lo, hi = g["lo"] - margin_mm, g["hi"] + margin_mm
         parts.append({
-            "idx": g["idx"], "lo": lo, "hi": hi,
+            "idx": g["idx"], "lo": lo, "hi": hi, "area_mm2": float(areas[g["idx"]].sum()),
             "center": (lo + hi) / 2.0, "dims_mm": hi - lo,
             "fits": fits_block(hi - lo, max_dims),
         })
@@ -201,6 +207,24 @@ def build_parts(vertices, faces, method, foam_h_mm, target_parts=None, margin_mm
         "bbox_lo": np.min([p["lo"] for p in parts], axis=0),
         "bbox_hi": np.max([p["hi"] for p in parts], axis=0),
     }
+
+
+def foam_qty_by_part(parts, total_area_sqm=None):
+    """
+    ปริมาณโฟม (ก้อน) ตามสูตรเดียวกับหน้า 'ประเมินราคา' (estimate_foam_blocks_needed จากพื้นที่ผิว)
+    แล้วกระจายลงแต่ละชิ้นตามสัดส่วนพื้นที่ผิว ผลรวมทุกชิ้นเท่ากับตัวเลขหน้าประเมินราคาเสมอ
+    คืน (รวม, list ต่อชิ้น) หรือ (None, None) ถ้าโหลดสูตรไม่ได้
+    """
+    try:
+        from machining_estimator import estimate_foam_blocks_needed
+    except Exception:
+        return None, None
+    areas = np.array([p["area_mm2"] for p in parts], dtype=float)
+    if not total_area_sqm or total_area_sqm <= 0:
+        total_area_sqm = areas.sum() / 1_000_000.0
+    total = float(estimate_foam_blocks_needed(total_area_sqm)["blocks_needed"])
+    share = areas / areas.sum() if areas.sum() > 0 else np.full(len(parts), 1.0 / len(parts))
+    return total, list(share * total)
 
 
 def summarize_blocks(block_dims_mm, bbox_dims_mm):
@@ -393,23 +417,29 @@ def render_smart_partition_page(lang="TH", title=None, subtitle=None):
 
     fit_flags = [fits_block(d, max_dims) for d in block_dims_mm]
     vol = [w * l * h / 1000.0 for w, l, h in block_dims_mm]
-    st.dataframe(pd.DataFrame({
+    total_qty, qty_parts = foam_qty_by_part(parts, st.session_state.get("surface_area_sqm"))
+    status_cols = {
         col_name: [p["name"] for p in parts],
         tr("ปริมาตรก้อน (cm³)", "Block volume (cm³)"): [round(v, 1) for v in vol],
         tr("สถานะ", "Status"): [tr("✅ พอดีแผ่นโฟม", "✅ Fits") if ok else tr("⚠️ เกินขนาดแผ่นโฟม", "⚠️ Too large") for ok in fit_flags],
-    }), hide_index=True, width="stretch")
+    }
+    if qty_parts is not None:
+        status_cols[tr("ปริมาณโฟมโดยประมาณ (ก้อน)", "Est. foam qty (pcs)")] = [round(q, 2) for q in qty_parts]
+    st.dataframe(pd.DataFrame(status_cols), hide_index=True, width="stretch")
     if not all(fit_flags):
         st.warning(tr(f"⚠️ มี {fit_flags.count(False)} ชิ้นที่ใหญ่เกินแผ่นโฟมมาตรฐาน — เพิ่มจำนวนชิ้นส่วน หรือเพิ่มความสูงแผ่นโฟม",
                       f"⚠️ {fit_flags.count(False)} part(s) exceed the standard foam block — add parts or raise the foam height."))
 
     summary = summarize_blocks(block_dims_mm, result["bbox_hi"] - result["bbox_lo"])
-    s1, s2, s3, s4 = st.columns(4)
+    s0, s1, s2, s3, s4 = st.columns(5)
+    if total_qty is not None:
+        s0.metric(tr("ปริมาณโฟมที่ต้องใช้", "Foam quantity"), f"{total_qty:.1f} " + tr("ก้อน", "pcs"))
     s1.metric(tr("จำนวนชิ้นส่วน", "Parts"), f"{len(parts)}")
-    s2.metric(tr("ปริมาตรก้อนโฟมรวม", "Total block volume"), f"{summary['total_cm3']:,.0f} cm³")
+    s2.metric(tr("ปริมาตรกล่องครอบรวม", "Total bounding volume"), f"{summary['total_cm3']:,.0f} cm³")
     s3.metric(tr("ก้อนใหญ่ก้อนเดียว", "Single big block"), f"{summary['single_cm3']:,.0f} cm³")
     s4.metric(tr("ปริมาตรที่ลดได้", "Volume saved"), f"{summary['saving_pct']:.1f}%")
-    st.caption(tr("ℹ️ ตัวเลขนี้คือปริมาตรกล่องครอบแต่ละชิ้นเพื่อวางแผนการตัด ไม่ใช่ปริมาณโฟมที่สั่งซื้อ (ดูหน้า 'ประเมินราคา')",
-                  "ℹ️ These are bounding-box volumes for cut planning, not the foam quantity to order (see the cost page)."))
+    st.caption(tr("ℹ️ 'ปริมาณโฟมที่ต้องใช้' ใช้สูตรเดียวกับหน้า 'ประเมินราคา' (จากพื้นที่ผิว ปรับค่าจากใบประเมินจริง) แล้วกระจายตามพื้นที่ผิวของแต่ละชิ้น ส่วนปริมาตรกล่องครอบใช้ดูการวางแผนตัดเท่านั้น ไม่ใช่ปริมาณที่สั่งซื้อ",
+                  "ℹ️ 'Foam quantity' uses the same surface-area formula as the cost page, split by each part's surface area. Bounding volumes are for cut planning only, not the quantity to order."))
 
     # ---- ภาพ 3 มิติ ----
     st.markdown("---")
