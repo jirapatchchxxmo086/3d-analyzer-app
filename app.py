@@ -11,6 +11,7 @@ import streamlit.components.v1 as components
 import auth
 from grid_visualizer import create_foam_grid_visualizer, get_submeshes, FOAM_GRID_WIDTH_MM, FOAM_GRID_LENGTH_MM
 from machining_estimator import estimate_3d_print_hours, estimate_foam_cnc_hours, estimate_petg_rolls_from_hours
+from foam_partition import render_smart_partition_page
 
 auth.require_login()
 
@@ -1788,99 +1789,4 @@ elif page == t["page_2_name"]:
 # 🧩 นำโค้ดหน้านี้มาวางต่อท้ายตรงนี้ได้เลยครับ
 # ==========================================
 elif page == t["page_smart_name"]:
-    st.subheader(t["smart_title"])
-    st.caption(t["smart_sub"])
-
-    # 1. ดึงขนาด Bounding Box 3D จากหน้าแรก (แปลงหน่วยจาก มม. เป็น ซม.)
-    box_w = float(st.session_state.get('width_x_mm', 1200)) / 10.0 if 'width_x_mm' in st.session_state else 120.0
-    box_l = float(st.session_state.get('length_y_mm', 1000)) / 10.0 if 'length_y_mm' in st.session_state else 100.0
-    box_h = float(st.session_state.get('height_z_mm', 1800)) / 10.0 if 'height_z_mm' in st.session_state else 180.0
-
-    st.info(f"📦 **Bounding Box ของชิ้นงาน 3 มิติ (จากหน้าแรก):** กว้าง (X): **{box_w:.1f} ซม.** | ยาว (Y): **{box_l:.1f} ซม.** | สูง (Z): **{box_h:.1f} ซม.**")
-
-    # 2. ตั้งค่าขนาดโฟมมาตรฐานและสไลเดอร์ความสูง
-    st.markdown("---")
-    st.subheader("📏 กำหนดขนาดแผ่นโฟมดิบสำหรับการผลิต")
-    
-    col_f1, col_f2 = st.columns(2)
-    col_f1.metric("ความกว้างแผ่นโฟมมาตรฐาน", "60 ซม. (600 mm)")
-    col_f2.metric("ความยาวแผ่นโฟมมาตรฐาน", "120 ซม. (1200 mm)")
-    
-    # สไลเดอร์ปรับความสูงโฟม 1 - 3 เมตร (100 - 300 ซม.)
-    foam_height_cm = st.slider("เลือกความสูงของแผ่นโฟม (เมตร):", min_value=1.0, max_value=3.0, value=1.8, step=0.1, format="%.1f เมตร")
-    foam_h_cm = foam_height_cm * 100.0  # แปลงเป็นซม. สำหรับคำนวณ
-
-    complexity = st.selectbox(
-        t["smart_complexity"],
-        options=["เรียบง่าย (ทรงกล่อง/ทรงกระบอก)", "ปานกลาง (มีส่วนยื่นเล็กน้อย)", "ซับซ้อนสูง (มีแขน/ขา/ปีกยื่นชัดเจน)"],
-        key="smart_complexity_sel"
-    )
-
-    # 3. อัลกอริทึมแนะนำจำนวนส่วนอัตโนมัติ
-    max_box_dim = max(box_w, box_l, box_h)
-    if "เรียบง่าย" in complexity:
-        rec_parts = 1
-    elif "ปานกลาง" in complexity:
-        rec_parts = 3 if max_box_dim <= 150 else 4
-    else:
-        rec_parts = 8 if max_box_dim <= 120 else 10
-
-    st.info(f"💡 **ผลการวิเคราะห์รูปทรง:** ระบบแนะนำให้แบ่งก้อนโฟมออกเป็น **{rec_parts} ส่วน**")
-
-    # 4. Slider ปรับเลือกจำนวนส่วน
-    num_parts = st.slider("ปรับเลือกจำนวนส่วนที่ต้องการแบ่ง / Select number of parts:", min_value=1, max_value=12, value=rec_parts, key="smart_num_parts_slider")
-
-    # 5. คำนวณจำลองข้อมูลชิ้นส่วนย่อย
-    import pandas as pd
-    import numpy as np
-
-    parts_list = []
-    slice_w = box_w / np.ceil(num_parts**(1/3))
-    slice_l = box_l / np.ceil(num_parts**(1/3))
-    slice_h = box_h / max(1, int(np.ceil(num_parts / (np.ceil(num_parts**(1/3))**2))))
-
-    for i in range(1, num_parts + 1):
-        p_w = round(slice_w * np.random.uniform(0.9, 1.1), 1)
-        p_l = round(slice_l * np.random.uniform(0.9, 1.1), 1)
-        p_h = round(slice_h * np.random.uniform(0.9, 1.1), 1)
-        parts_list.append({
-            "ส่วนที่": f"ชิ้นส่วน #{i}",
-            "กว้าง (cm)": p_w, "ยาว (cm)": p_l, "สูง (cm)": p_h,
-            "ปริมาตร (cm³)": round(p_w * p_l * p_h, 2)
-        })
-
-    df_parts = pd.DataFrame(parts_list)
-    
-    st.markdown("---")
-    st.subheader("📋 รายละเอียดขนาดโฟมแต่ละชิ้นส่วนที่แนะนำ")
-    st.metric("จำนวนชิ้นส่วนที่แบ่งผลิต", f"{num_parts} ส่วน")
-    st.dataframe(df_parts, use_container_width=True)
-
-    # 6. แสดงภาพจำลอง 3 มิติและการแบ่งโฟมจากโมเดลจริง
-    st.markdown("---")
-    st.subheader("🧊 ภาพจำลองการแบ่งก้อนโฟมจากโมเดล 3D จริง")
-    st.caption("แสดงผลการตัดแบ่งชิ้นส่วน 3 มิติจากไฟล์ต้นฉบับโดยใช้ระบบ Grid Visualizer")
-
-    mesh_obj = st.session_state.get("mesh", None)
-
-    if mesh_obj is not None:
-        try:
-            # ดึงค่าความยาว (Y) และความสูง (Z ในหน่วยมิลลิเมตร) ส่งเข้าไปยังฟังก์ชัน
-            y_val_mm = float(st.session_state.get('length_y_mm', box_l * 10.0))
-            z_val_mm = foam_h_cm * 10.0  # แปลงความสูงโฟมจากซม. เป็นมม.
-
-            fig_visualizer = create_foam_grid_visualizer(
-                mesh=mesh_obj,
-                y_mm=y_val_mm,
-                z_mm=z_val_mm
-            )
-            
-            if fig_visualizer:
-                st.plotly_chart(fig_visualizer, use_container_width=True)
-            else:
-                st.info("💡 ระบบกำลังประมวลผลการแสดงผล 3D กรุณาตรวจสอบข้อมูลชิ้นงานอีกครั้ง")
-                
-        except Exception as e:
-            st.error(f"⚠️ เกิดข้อผิดพลาดในการเรนเดอร์โมเดล 3D: {e}")
-    else:
-        st.warning("⚠️ ยังไม่พบไฟล์โมเดล 3D ในระบบ กรุณาอัปโหลดไฟล์โมเดล 3D ที่หน้าแรก (Analyzer) ก่อนใช้งานฟังก์ชันนี้ครับ")
+    render_smart_partition_page(lang=lang, title=t["smart_title"], subtitle=t["smart_sub"])
