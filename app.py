@@ -1289,6 +1289,51 @@ elif page == t["page_2_name"]:
                     }
                     st.session_state["selected_operations"].append(new_op)
                     st.toast(f"Added {selected_machine} x {op_qty} {op_unit}")
+                    # ===== ปุ่มลิงก์ค่าประมาณ PETG -> รายการวัสดุ (เฉพาะ 3D Print FDM) =====
+            # วางต่อท้ายบล็อก "with o_col4:" ถัดจากปุ่ม "เพิ่มกระบวนการ" (ย่อหน้าเท่ากับ if st.button(t["op_add_btn"]...)
+            if selected_machine == "3D Print FDM":
+                if st.button(
+                    "➕ เพิ่ม PETG ลงรายการวัสดุ" if lang == "TH" else "➕ Add PETG to materials",
+                    use_container_width=True, key="add_petg_btn",
+                    help=("เพิ่ม/แทนที่แถว PETG ในรายการวัสดุตามจำนวนม้วนที่ประเมินได้ (ปัดขึ้นเป็นม้วนเต็ม คูณจำนวนที่ผลิต)"
+                          if lang == "TH" else
+                          "Add/replace the PETG row in the materials list using the estimated rolls (rounded up, x quantity)"),
+                ):
+                    PETG_CATEGORY, PETG_ITEM = "3D Print / เรซิน", "PETG"
+                    petg_entry = MATERIAL_MASTER_DB.get(PETG_CATEGORY, {}).get(PETG_ITEM)
+                    petg_cat_used, petg_name_used = PETG_CATEGORY, PETG_ITEM
+                    if petg_entry is None:                       # ไม่เจอตามชื่อที่ตั้งไว้ ลองหารายการชื่อ PETG ในทุกหมวด
+                        for _cat, _items in MATERIAL_MASTER_DB.items():
+                            for _name, _val in _items.items():
+                                if str(_name).strip().upper() == "PETG":
+                                    petg_entry, petg_cat_used, petg_name_used = _val, _cat, _name
+                                    break
+                            if petg_entry is not None:
+                                break
+                    if petg_entry is None:
+                        st.error(
+                            "ไม่พบรายการ PETG ในชีท Materials (หมวด '3D Print / เรซิน')"
+                            if lang == "TH" else
+                            "PETG not found in the Materials sheet (category '3D Print / เรซิน')"
+                        )
+                    else:
+                        rolls_per_piece = float(bd.get("petg_rolls_exact", 0.0))
+                        rolls_total = int(math.ceil(round(rolls_per_piece * production_qty, 6))) if rolls_per_piece > 0 else 0
+                        if rolls_total <= 0:
+                            st.warning("ยังไม่มีค่าประมาณ PETG (ไม่มีพื้นที่ผิวโมเดล)" if lang == "TH" else "No PETG estimate yet (no model surface area)")
+                        else:
+                            unit_price = float(petg_entry["cost"])     # Cost = ราคาที่คิดกับลูกค้า (ตามที่ยืนยันไว้)
+                            unit_ref = float(petg_entry["price"])
+                            st.session_state["selected_materials"] = [
+                                m for m in st.session_state["selected_materials"] if not m.get("auto_petg")
+                            ]
+                            st.session_state["selected_materials"].append({
+                                "cat": petg_cat_used, "name": petg_name_used, "qty": float(rolls_total),
+                                "unit_price": unit_price, "unit_cost": unit_ref,
+                                "total_price": unit_price * rolls_total, "total_cost": unit_ref * rolls_total,
+                                "auto_petg": True,
+                            })
+                            st.toast(f"PETG x {rolls_total} ม้วน (฿{unit_price * rolls_total:,.0f})")
 
     if st.session_state["selected_operations"]:
         st.markdown(f"###### {t['op_selected_list']}")
