@@ -294,3 +294,4 @@ def estimate_3d_print_hours(
             "calibration_note": "FDM calibrated from 7 real quotes (0.4-1.4 sqm, full prints only)",
         },
     )
+from fdm_estimator import estimate_3d_print_hours, estimate_petg_rolls_from_hours  # noqa: E402,F401
