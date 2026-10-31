@@ -1206,7 +1206,7 @@ elif page == t["page_2_name"]:
                 elif selected_machine == "3D Print FDM":
                     fdm_infill_pct = st.slider(
                         "Infill (%)" if lang != "TH" else "Infill (%)",
-                        min_value=0, max_value=100, value=15, step=5,
+                        min_value=5, max_value=100, value=9, step=1,
                         key=f"fdm_infill_{selected_machine}",
                         help=(
                             "สัดส่วนเนื้อพลาสติกด้านในชิ้นงาน (ไม่รวมผนังนอก) — ยิ่งสูง "
