@@ -1317,7 +1317,7 @@ elif page == t["page_2_name"]:
                             "PETG not found in the Materials sheet (category '3D Print / เรซิน')"
                         )
                     else:
-                        rolls_per_piece = float(bd.get("petg_rolls_exact", 0.0))
+                        rolls_per_piece = float(bd.get("petg_rolls_exact", bd.get("petg_rolls", 0.0)))
                         rolls_total = int(math.ceil(round(rolls_per_piece * production_qty, 6))) if rolls_per_piece > 0 else 0
                         if rolls_total <= 0:
                             st.warning("ยังไม่มีค่าประมาณ PETG (ไม่มีพื้นที่ผิวโมเดล)" if lang == "TH" else "No PETG estimate yet (no model surface area)")
