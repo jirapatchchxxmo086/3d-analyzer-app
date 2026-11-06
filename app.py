@@ -10,7 +10,7 @@ from string import Template
 import streamlit.components.v1 as components
 import auth
 from grid_visualizer import create_foam_grid_visualizer, get_submeshes, FOAM_GRID_WIDTH_MM, FOAM_GRID_LENGTH_MM
-from machining_estimator import estimate_3d_print_hours, estimate_foam_cnc_hours, estimate_petg_rolls_from_hours
+from machining_estimator import estimate_3d_print_hours, estimate_foam_cnc_hours, estimate_petg_rolls_from_hours, estimate_foam_blocks_needed
 from foam_partition import render_smart_partition_page
 
 auth.require_login()
@@ -158,7 +158,6 @@ TEXTS = {
         "size_reset_btn": "↺ รีเซ็ตเป็นขนาดไฟล์ต้นฉบับ",
         "size_recalc_note": "💡 พื้นที่ผิว/ปริมาตรคำนวณใหม่อัตโนมัติตามขนาดที่ปรับ",
         "file_uploader": "เลือกไฟล์โมเดล 3D",
-        "success_msg": "✅ ประมวลผลไฟล์สำเร็จ! ส่งข้อมูลไปยังหน้า 2 เรียบร้อย",
         "viewer_title": "🖥️ ตัวอย่างโมเดล 3D Interactive",
         "viewer_help": "หมุน: คลิกซ้าย | ขยาย: สกรอลล์ | ย้าย: คลิกขวา",
         "dim_title": "📐 ขนาดโมเดล (Dimensions)",
@@ -187,7 +186,6 @@ TEXTS = {
         "production_qty": "จำนวนที่ผลิต (Qty)",
         "per_piece_area_note": "พื้นที่ผิวต่อชิ้นจากไฟล์ 3D: {:.4f} ตร.ม. × {} ชิ้น = {:.4f} ตร.ม.",
         "op_title": "⚙️ เลือกกระบวนการเครื่องจักร (Operations)",
-        "mch_rate": "ค่าเครื่อง (฿/Hr)",
         "op_select_machine": "เลือกประเภทเครื่องจักร",
         "op_rate": "ค่าเครื่อง",
         "op_qty_hr": "จำนวนชั่วโมง (Hr)",
@@ -233,11 +231,6 @@ TEXTS = {
         "Total_Estimate_Cost": "🏷️ ราคารวมประมาณการ (Total Estimate Cost)",
         "smart_title": "🧩 ระบบวิเคราะห์และประเมินการแบ่งก้อนโฟมอัตโนมัติ (Smart Partition)",
         "smart_sub": "ระบบคำนวณจำนวนส่วนที่เหมาะสมที่สุดตามรูปทรง เพื่อลดขยะโฟมและต้นทุนผลิตโดยอัตโนมัติ",
-        "smart_w_label": "ความกว้างรวม (cm)",
-        "smart_l_label": "ความยาวรวม (cm)",
-        "smart_h_label": "ความสูงรวม (cm)",
-        "smart_complexity": "ความซับซ้อนของรูปทรง (Complexity)",
-        "smart_f_price": "ราคาโฟม (บาท / cm³)",
     },
     "EN": {
         "sidebar_menu": "📌 Main Menu",
@@ -260,7 +253,6 @@ TEXTS = {
         "size_reset_btn": "↺ Reset to original file size",
         "size_recalc_note": "💡 Surface area/volume recalculate automatically with the adjusted size",
         "file_uploader": "Select a 3D model file",
-        "success_msg": "✅ File processed successfully! Data passed to Page 2.",
         "viewer_title": "🖥️ 3D Model Interactive Viewer",
         "viewer_help": "Rotate: Left Click | Zoom: Scroll | Pan: Right Click",
         "dim_title": "📐 Model Dimensions",
@@ -289,7 +281,6 @@ TEXTS = {
         "production_qty": "Production Quantity (Qty)",
         "per_piece_area_note": "Per-piece surface area from 3D file: {:.4f} sq.m. × {} pcs = {:.4f} sq.m.",
         "op_title": "⚙️ Select Machine Operations",
-        "mch_rate": "Machine Rate (฿/Hr)",
         "op_select_machine": "Select Machine Type",
         "op_rate": "Rate",
         "op_qty_hr": "Hours (Hr)",
@@ -332,14 +323,9 @@ TEXTS = {
         "mch_cost": "Machine Processing Cost",
         "mat_cost": "Material & Equipment Cost",
         "paint_cost": "Coating & Painting Cost",
-        "Total_Estimate_Cost": "🏷️Total Estimated Cost",
+        "Total_Estimate_Cost": "🏷️ Total Estimated Cost",
         "smart_title": "🧩 Smart Foam Partitioning & Cost Estimator",
         "smart_sub": "Automatically calculates the optimal number of partitions to minimize foam waste and production costs.",
-        "smart_w_label": "Total Width (cm)",
-        "smart_l_label": "Total Length (cm)",
-        "smart_h_label": "Total Height (cm)",
-        "smart_complexity": "Shape Complexity / Overhangs",
-        "smart_f_price": "Foam Price (THB / cm³)",
     }
 }
 
@@ -377,11 +363,6 @@ if "submesh_count" not in st.session_state:
 # 🛠️ Helper Functions & Constants
 # ==========================================
 SCALE_TO_M = 0.001
-
-# STL/OBJ/PLY/OFF files carry no unit metadata — trimesh just returns whatever
-# numbers are in the file. The app previously assumed every file was already
-# in millimeters (see FIX NOTE below), which silently produces wrong areas/
-# volumes/prices for files authored in cm, m, or inches. Let the user tell us.
 UNIT_TO_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "inch": 25.4}
 
 def process_and_clean_mesh(loaded_data):
@@ -588,9 +569,6 @@ HTML_TEMPLATE = Template("""
             geometry.computeBoundingSphere();
             const radius = geometry.boundingSphere.radius;
 
-            // FIX: near/far and orbit zoom limits now scale with the model instead
-            // of being fixed values, so large models don't get clipped by the far
-            // plane and small models don't get near-clipped when zoomed in close.
             camera.near = Math.max(radius / 500, 0.01);
             camera.far = Math.max(radius * 20, 2000);
             camera.updateProjectionMatrix();
@@ -693,15 +671,9 @@ if page == t["page_1_name"]:
         t["file_uploader"],
         type=["stl", "obj", "ply", "off", "3mf"]
     )
-    # Source file unit is fixed to mm (no dropdown) per request — all files in
-    # this workflow are authored in mm.
     file_unit_to_mm = UNIT_TO_MM["mm"]
 
     if uploaded_file is not None:
-        # FIX: เพิ่มเช็คขนาดไฟล์ขั้นต่ำ กันไฟล์เปล่า/เสีย (0 KB หรือใกล้ 0) ที่จะทำให้
-        # trimesh.load() พังตอนอ่าน vertices ไม่ได้ โดยไม่มีข้อความ error ที่เข้าใจง่าย
-        # ตั้งไว้ต่ำมาก (1 KB) เพื่อกันเฉพาะไฟล์ที่ชัดเจนว่าเสีย/ว่างเปล่า ไม่ได้ตั้งใจกัน
-        # ไฟล์ 3D เล็กที่ถูกต้อง (ไฟล์ STL/OBJ ที่มีรูปทรงจริงมักมีขนาดมากกว่านี้อยู่แล้ว)
         MIN_FILE_SIZE_KB = 1.0
         file_size_kb_check = uploaded_file.size / 1024.0
         if file_size_kb_check < MIN_FILE_SIZE_KB:
@@ -728,9 +700,6 @@ if page == t["page_1_name"]:
 
                 is_point_cloud = isinstance(mesh, trimesh.PointCloud)
 
-                # FIX: previously `mesh_mm.apply_scale(SCALE_TO_M * 1000.0)` == apply_scale(1.0),
-                # a no-op that silently assumed the source file was already in millimeters.
-                # Now it uses the unit the user picked above.
                 mesh_mm = mesh.copy()
                 mesh_mm.apply_scale(file_unit_to_mm)
                 base_extents = mesh_mm.extents
@@ -806,7 +775,6 @@ if page == t["page_1_name"]:
                 is_watertight = False
                 used_convex_hull = False
                 used_bbox_estimate = False
-
                 used_voxel_estimate = False
 
                 if is_point_cloud:
@@ -821,15 +789,6 @@ if page == t["page_1_name"]:
                     if is_watertight:
                         volume_m3 = final_mesh.volume / 1_000_000_000.0
 
-                    # FIX (ลำดับความสำคัญใหม่): เดิมลอง Convex Hull ก่อนเสมอ แล้วค่อยลองซ่อม
-                    # (fill_holes) ทีหลัง — แต่ fill_holes จะไม่ถูกเรียกเลยถ้า Convex Hull
-                    # สำเร็จไปแล้ว (volume_m3 > 0) ทั้งที่ Convex Hull มักประเมินปริมาตรสูง
-                    # เกินจริงมาก (ไม่รู้จักส่วนเว้า/ร่อง/โพรง) ตอนนี้เรียงลำดับใหม่ให้ลอง
-                    # วิธีที่แม่นกว่าก่อนเสมอ: ซ่อมให้ปิดสนิท -> Voxelization -> Convex Hull
-                    # -> เดาคร่าวจาก Bounding Box (เดิมเป็นขั้นตอนสุดท้ายอยู่แล้ว)
-
-                    # 1) ลองซ่อมให้ปิดสนิทก่อน (เพิ่มขั้นตอนซ่อมให้ครบกว่าเดิม ซึ่งเคยมีแค่
-                    # fill_holes อย่างเดียว) ถ้าซ่อมสำเร็จ จะได้ปริมาตรที่แม่นยำที่สุด
                     if volume_m3 <= 0:
                         try:
                             repaired = final_mesh.copy()
@@ -843,11 +802,6 @@ if page == t["page_1_name"]:
                         except Exception:
                             pass
 
-                    # 2) Voxelization — แบ่งพื้นที่เป็นลูกบาศก์เล็กๆ แล้วนับว่าลูกบาศก์ไหนอยู่
-                    # ข้างในโมเดล ทนทานต่อรูรั่วเล็ก-กลางได้ดีกว่า fill_holes มาก และแม่นยำ
-                    # กว่า Convex Hull เพราะรู้จักส่วนเว้า/โพรงของรูปทรง — ปรับขนาด voxel
-                    # (pitch) ตามสัดส่วนของโมเดลเอง กันไม่ให้โมเดลใหญ่ใช้ voxel ละเอียดเกินไป
-                    # จนกิน RAM/เวลานาน (ควบคุมไว้ที่ราว 60 voxel ต่อด้านยาวที่สุด)
                     if volume_m3 <= 0:
                         try:
                             longest_edge_mm = max(float(final_mesh.extents.max()), 1.0)
@@ -860,8 +814,6 @@ if page == t["page_1_name"]:
                         except Exception:
                             pass
 
-                    # 3) Convex Hull — ย้ายมาเป็นขั้นรองจากเดิม (เดิมเป็นขั้นแรก) เพราะมักสูง
-                    # เกินจริงสำหรับรูปทรงที่มีส่วนเว้า แต่ยังดีกว่าไม่มีตัวเลขเลย
                     if volume_m3 <= 0:
                         try:
                             hull = final_mesh.convex_hull
@@ -870,13 +822,8 @@ if page == t["page_1_name"]:
                         except Exception:
                             volume_m3 = 0.0
 
-                    # 4) เดาคร่าวสุดท้ายจาก Bounding Box (เหมือนเดิม — ใช้เฉพาะกรณีทุกวิธี
-                    # ข้างบนล้มเหลวหมด ซึ่งควรเกิดขึ้นน้อยมากหลังเพิ่ม voxelization แล้ว)
                     if volume_m3 <= 0:
                         try:
-                            # ASSUMPTION: ไม่รู้ solidity จริงของโมเดล ใช้ 40% ของปริมาตร
-                            # oriented bounding box เป็นค่ากลางๆ (ระหว่างโมเดลกลวงบางกับ
-                            # โมเดลตัน) — ประมาณคร่าวมาก แจ้งเตือนผู้ใช้ชัดเจนในหน้าเว็บ
                             obb_volume_mm3 = final_mesh.bounding_box_oriented.volume
                             volume_m3 = (obb_volume_mm3 * 0.4) / 1_000_000_000.0
                             used_bbox_estimate = True
@@ -952,8 +899,6 @@ if page == t["page_1_name"]:
                 if is_watertight:
                     res_b.metric(t["vol_exact"], f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm")
                 elif used_voxel_estimate and volume_m3 > 0:
-                    # FIX: เพิ่มขั้น Voxelization เป็นทางเลือกก่อนถึง Convex Hull/Bounding Box
-                    # แม่นยำกว่าทั้งสองวิธีนั้นสำหรับไฟล์รั่วที่ยังพอซ่อมเป็นรูปทรงปิดไม่ได้
                     res_b.metric(
                         "ปริมาตร (ประมาณจาก Voxelization)" if lang == "TH" else "Volume (Voxelized estimate)",
                         f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm"
@@ -975,7 +920,7 @@ if page == t["page_1_name"]:
                         f"{volume_m3:,.4f} cu.m", f"{volume_cm3:,.1f} cu.cm"
                     )
                     st.warning(
-                        "⚠️ โมเดลนี้คำนวณปริมาตรแบบละเอียดไม่ได้เลย (ไม่ watertight, ซ่อมไม่ได้, "
+                        "⚠️ โมเดลนี้คำนวณปริมาตรแบบรายละเอียดไม่ได้เลย (ไม่ watertight, ซ่อมไม่ได้, "
                         "Voxelization ก็ล้มเหลว, Convex Hull ก็ล้มเหลว) ตัวเลขนี้จึงเป็นการ"
                         "ประมาณคร่าวๆ จาก Bounding Box เท่านั้น (สมมติความตัน 40%) ไม่แม่นยำเท่า"
                         "ปริมาตรจริง — ควรตรวจสอบไฟล์ 3D ต้นฉบับว่ามีรูรั่ว/geometry เสียหนักแค่ไหน"
@@ -1055,12 +1000,6 @@ elif page == t["page_2_name"]:
         estimate_foam_blocks_needed,
     )
 
-    # FIX: these were previously called with no caching, so every single widget
-    # interaction on this page (a slider drag, a number_input change, etc.)
-    # re-read the master-data source (Excel/Sheets) from scratch. That's the
-    # most likely cause of the page feeling slow/laggy. st.cache_data keeps the
-    # result in memory and only reloads if the underlying function's code/args
-    # change or the TTL expires.
     @st.cache_data(ttl=300, show_spinner=False)
     def _cached_material_master_db():
         return load_material_master_db()
@@ -1089,9 +1028,6 @@ elif page == t["page_2_name"]:
     def _cached_complexity_hours():
         return load_complexity_hours()
 
-    # FIX: previously an unhandled network/token error here would crash the whole
-    # page with a raw traceback. Now it shows a message the user can act on, with
-    # a button to retry (clears the 5-minute cache so the next click re-fetches).
     try:
         MATERIAL_MASTER_DB = _cached_material_master_db()
         COAT_PROCESS_RATES = _cached_coat_process_rates()
@@ -1107,9 +1043,6 @@ elif page == t["page_2_name"]:
             st.rerun()
         st.stop()
 
-    # FIX: check_for_duplicate_items() existed in data_loader.py but was never
-    # called, so duplicate rows in the Sheet silently overwrote each other with
-    # no warning. Surface it here.
     dq_warnings = get_data_quality_warnings()
     if dq_warnings:
         with st.expander(
@@ -1121,11 +1054,6 @@ elif page == t["page_2_name"]:
             for w in dq_warnings:
                 st.write(f"- {w}")
 
-    # FIX: previously hardcoded here (and the hour tables stopped at level 8 even
-    # though the complexity slider goes to 10). Now sourced from the LaborRates /
-    # ComplexityHours sheets via Code.gs, so editing the sheet is enough to
-    # update these — no code deploy needed, and any level actually defined in
-    # the sheet is honored (not capped at 8).
     HARD_COAT_HOURS = {lvl: v["hard_coat"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
     SANDING_HOURS = {lvl: v["sanding"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
     PAINTING_HOURS = {lvl: v["painting"] for lvl, v in COMPLEXITY_HOURS_DB.items()}
@@ -1243,7 +1171,6 @@ elif page == t["page_2_name"]:
                     suggested_qty = print_result.hours
                     bd = print_result.breakdown
 
-                    # เรียกใช้ฟังก์ชันคำนวณม้วน PETG จากชั่วโมงพิมพ์ (machine_hours)
                     petg_info = estimate_petg_rolls_from_hours(
                         machine_hours=bd.get("machine_hours", 0)
                     )
@@ -1315,8 +1242,6 @@ elif page == t["page_2_name"]:
     if st.session_state["selected_operations"]:
         st.markdown(f"###### {t['op_selected_list']}")
 
-        # FIX: แสดงผลแบบทีละแถวด้วย st.columns แทน st.dataframe เพื่อใส่ปุ่มลบ (🗑️) ต่อแถวได้
-        # เดิมมีแค่ "ล้างรายการทั้งหมด" ถ้าเลือกผิด 1 รายการต้องลบทิ้งทั้งหมดแล้วเลือกใหม่ทุกอัน
         op_header_cols = st.columns([2.2, 1.3, 1.1, 1.1, 1.2, 0.6])
         for col, label in zip(
             op_header_cols,
@@ -1370,8 +1295,6 @@ elif page == t["page_2_name"]:
                 slice_mode=current_slice_mode
             )
             st.plotly_chart(fig_grid, use_container_width=True, key="p2_foam_grid_chart")
-            # หมายเหตุ: เดิมมีตาราง "แผนการตัดแบ่งจริง" (นับจำนวนก้อนตามกริด) อยู่ใต้ภาพนี้
-            # ตัดออกตามที่ขอ — เหลือแค่ภาพจำลอง/กริดอ้างอิงไว้ดูเฉยๆ ไม่มีตัวเลขสรุปด้านล่าง
 
         st.markdown("##### 💡 แนะนำกลยุทธ์การตัดแบ่งและกัดโฟม (Machining Optimization Strategy)")
 
@@ -1418,21 +1341,6 @@ elif page == t["page_2_name"]:
             st.metric(label="⏱️ ประเมินเวลาที่ลดได้", value=f"~{est_time_saved}%")
             st.metric(label="📦 ประเมินการลดขยะโฟม", value=f"~{est_material_saved}%")
 
-    # ==========================================
-    # 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)
-    # ==========================================
-    # ใช้สูตร "พื้นที่ผิว" (surface_area_sqm) — fit จากใบประเมินจริง 8 ตัวอย่าง ครอบคลุม
-    # ตั้งแต่โมเดลเล็ก (Apple Jack/Twilight ~0.9m) ถึงใหญ่มาก (Sully 8m) R²=0.988 (ดูรายละเอียด
-    # สูตรและเหตุผลที่พื้นที่ผิวแม่นกว่า bounding box ใน machining_estimator.py)
-    #
-    # FIX (สำคัญ): เดิมถ้าโมเดลมีหลายชิ้นส่วน (submesh_count > 1) จะรวมพื้นที่ผิวของแต่ละ
-    # ชิ้นส่วนแยกกัน (sm.area ของแต่ละชิ้นบวกกัน) ซึ่ง "นับพื้นที่ผิวเกินจริง" มาก เพราะรอยตัด
-    # ระหว่างชิ้นส่วน (เช่น รอยต่อแขนกับลำตัว) แต่เดิมเป็นพื้นผิวที่ซ่อนอยู่ข้างในโมเดล (ไม่นับ
-    # เป็นพื้นที่ผิวภายนอก) แต่พอแยกเป็นคนละชิ้น รอยตัดนั้นกลายเป็น "ผิวนอก" ของแต่ละชิ้นทันที
-    # ยิ่งโมเดลแยกหลายชิ้นเท่าไหร่ ยิ่งนับซ้ำเกินจริงมากขึ้นเรื่อยๆ (เคยทำให้ Sully8m ที่จริง
-    # พื้นที่ผิว 168 ตร.ม. กลายเป็น 227+ ตร.ม. จนคำนวณได้ 112.7 ก้อน ทั้งที่จริงใช้แค่ ~74 ก้อน)
-    # ตอนนี้ใช้พื้นที่ผิวรวมทั้งโมเดล (per_piece_area จากหน้า 1 มี trimesh คำนวณให้ตรงอยู่แล้ว)
-    # เสมอ ไม่ว่าโมเดลจะแยกกี่ชิ้นส่วนก็ตาม — ตรงกับพื้นที่ผิวที่ใบประเมินจริงใช้ (นับทั้งตัว)
     st.markdown("---")
     st.markdown("##### 📦 ประเมินจำนวนก้อนโฟมที่ต้องใช้ (Recommended Foam Blocks)")
 
@@ -1446,23 +1354,17 @@ elif page == t["page_2_name"]:
         total_blocks = round(per_piece_blocks * production_qty, 1)
 
     if per_piece_area > 0:
-        # ตามที่ขอ: โชว์แค่ตัวเลขเดียว "ปริมาณวัตถุดิบโฟมที่ต้องใช้ X ชิ้น" ไม่ต้องแยก
-        # ยอดรวม/เฉลี่ยต่อชิ้นให้ซับซ้อน — total_blocks คือยอดรวมทั้ง production_qty แล้ว
         st.info(
             f"ปริมาณวัตถุดิบโฟมที่ต้องใช้: {total_blocks:.1f} ชิ้น"
             if lang == "TH" else
             f"Foam material required: {total_blocks:.1f} piece(s)"
         )
-        # FIX: เพิ่มคำอธิบายที่มาของตัวเลข ให้เห็นชัดว่าคำนวณจากพื้นที่ผิวรวมทั้งโมเดล
-        # (ไม่ใช่ผลรวมของแต่ละชิ้นส่วนแยกกันอีกต่อไป — ดูหมายเหตุ FIX ด้านบน)
         st.caption(
             f"📐 คำนวณจากพื้นที่ผิวโมเดล {used_surface_area_sqm:.2f} ตร.ม."
             if lang == "TH" else
             f"📐 Calculated from model surface area = {used_surface_area_sqm:.2f} sq.m."
         )
-        # =========================================================
-        # 📦 ประเมินจำนวนม้วน PETG ที่ต้องใช้ (Recommended PETG Rolls)
-        # =========================================================
+
         if selected_machine == "3D Print FDM":
             petg_info = estimate_petg_rolls_from_hours(machine_hours=bd.get("machine_hours", 0))
             st.markdown("---")
@@ -1476,9 +1378,7 @@ elif page == t["page_2_name"]:
             st.caption(
                 f"คำนวณจากเวลาพิมพ์ {petg_info['machine_hours']} ชม. (อัตราฉีด 20 g/ชม. รวม Waste 8%)"
             )
-        # FIX (ตามที่ขอ): เตือนช่วงความแม่นยำสำหรับงานใหญ่ (สูงเกิน 2 เมตร) ให้เห็นชัดว่า
-        # ตัวเลขนี้ fit จากข้อมูลจริง 8 ตัวอย่าง (error -31% ถึง +23% ต่อจุด) — งานใหญ่ควร
-        # ตรวจทานเพิ่มก่อนสั่งซื้อจริง ไม่ควรใช้เป็นตัวเลขสุดท้ายแบบเป๊ะๆ ทันที
+
         if z_mm > 2000:
             st.caption(
                 "⚠️ งานขนาดใหญ่ (สูงเกิน 2 เมตร) ตัวเลขนี้อ้างอิงจากข้อมูลใบประเมินจริงที่มี "
@@ -1512,10 +1412,6 @@ elif page == t["page_2_name"]:
             materials_in_cat = list(MATERIAL_MASTER_DB[selected_cat].keys())
             selected_mat_item = st.selectbox(t["select_item"], materials_in_cat)
 
-            # FIX (บั๊กราคาวัสดุ): เทียบกับใบประเมินจริงแล้วยืนยันว่า "Cost" ในชีทคือค่าที่
-            # ใช้คิดราคาวัสดุจริงกับลูกค้า (บวกเข้า Grand Total) ไม่ใช่ "Price" ตามที่โค้ดเดิม
-            # ใช้ผิด — ตอนนี้ billed_rate (สิ่งที่นำไปคูณ qty เป็น Total) ดึงจาก "cost" แทน
-            # ส่วน "price" ยังดึงมาโชว์ไว้อ้างอิงเฉยๆ (ยังไม่ทราบว่ามีไว้ใช้ทำอะไรจริงๆ)
             billed_rate = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["cost"]
             sheet_price_ref = MATERIAL_MASTER_DB[selected_cat][selected_mat_item]["price"]
 
@@ -1542,7 +1438,6 @@ elif page == t["page_2_name"]:
     if st.session_state["selected_materials"]:
         st.markdown(f"###### {t['selected_mat_list']}")
 
-        # FIX: แสดงผลแบบทีละแถวเพื่อใส่ปุ่มลบ (🗑️) ต่อแถว — เลือกวัสดุผิด 1 ตัวลบเฉพาะแถวนั้นได้
         mat_header_cols = st.columns([1.6, 2.2, 1.0, 1.2, 1.2, 0.6])
         for col, label in zip(
             mat_header_cols,
@@ -1599,7 +1494,6 @@ elif page == t["page_2_name"]:
                     t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key="hc_area_coat"
                 )
             with c4:
-                # FIX (ตามที่ขอ): เพิ่มช่องกรอกจำนวนชุด ให้ทำซ้ำได้หลายรอบ (เช่น เคลือบ 2 ชั้น)
                 hc_sets = st.number_input(
                     "จำนวนชุด (Qty)" if lang == "TH" else "Sets (Qty)",
                     min_value=1.0, value=1.0, step=1.0, key="hc_sets_coat"
@@ -1625,8 +1519,6 @@ elif page == t["page_2_name"]:
             if st.button(t["finish_add_btn"], key="add_hc_mold"):
                 st.session_state["selected_finishes"].append({
                     "type": f"Mold - {hc_item}", "rate": hc_rate, "cost_rate": None,
-                    # หมายเหตุ: "จำนวนโมล (ชุด)" ของหมวดนี้ทำหน้าที่เป็น "จำนวนชุด" อยู่แล้ว
-                    # (คูณเข้าไปใน area/total ตั้งแต่ต้น) จึงเก็บ sets=hc_qty ไว้แสดงผลเฉยๆ
                     "area": round(hc_qty * per_piece_area, 4), "sets": hc_qty, "total": hc_total, "total_cost": None,
                 })
                 st.toast(f"Added {hc_item}")
@@ -1654,8 +1546,6 @@ elif page == t["page_2_name"]:
                 if st.button(t["finish_add_btn"], use_container_width=True, key="add_hc_work"):
                     st.session_state["selected_finishes"].append({
                         "type": f"Work - {hc_item}", "rate": hc_rate, "cost_rate": None,
-                        # หมายเหตุ: หมวดนี้ hc_qty ทำหน้าที่เป็นทั้ง area/จำนวนชุดอยู่แล้วแล้วแต่
-                        # billing unit จึงเก็บ sets=hc_qty ไว้แสดงผลเฉยๆ ไม่คูณซ้ำ
                         "area": hc_qty, "sets": hc_qty, "total": hc_rate * hc_qty, "total_cost": None,
                     })
                     st.toast(f"Added {hc_item}")
@@ -1704,7 +1594,6 @@ elif page == t["page_2_name"]:
                     t["finish_area"], min_value=0.0, value=float(calc_area), step=0.1, key="hc_area_color"
                 )
             with c4:
-                # FIX (ตามที่ขอ): เพิ่มช่องกรอกจำนวนชุด เช่นเดียวกับหมวด Coating
                 hc_sets = st.number_input(
                     "จำนวนชุด (Qty)" if lang == "TH" else "Sets (Qty)",
                     min_value=1.0, value=1.0, step=1.0, key="hc_sets_color"
@@ -1722,8 +1611,6 @@ elif page == t["page_2_name"]:
     if st.session_state["selected_finishes"]:
         st.markdown(f"###### {t['finish_selected_list']}")
 
-        # FIX: แสดงผลแบบทีละแถวเพื่อใส่ปุ่มลบ (🗑️) ต่อแถว — เลือกงานเคลือบผิวผิด 1 รายการ
-        # ลบเฉพาะแถวนั้นได้ ไม่ต้องกด "ล้างทั้งหมด" แล้วเลือกใหม่ทุกรายการ
         cost_col_label = "Total Cost (internal)" if lang == "EN" else "ต้นทุนภายใน (฿)"
         sets_col_label = "จำนวนชุด" if lang == "TH" else "Sets"
         finish_header_cols = st.columns([2.1, 1.0, 0.9, 1.0, 1.1, 1.2, 0.6])
@@ -1785,8 +1672,9 @@ elif page == t["page_2_name"]:
 
     st.markdown(f"### {t['Total_Estimate_Cost']}")
     st.title(f"฿ {subtotal:,.2f} THB")
+
 # ==========================================
-# 🧩 นำโค้ดหน้านี้มาวางต่อท้ายตรงนี้ได้เลยครับ
+# 🧩 หน้าที่ 3: วิเคราะห์แบ่งก้อนโฟมอัตโนมัติ (Smart Partition)
 # ==========================================
 elif page == t["page_smart_name"]:
     render_smart_partition_page(lang=lang, title=t["smart_title"], subtitle=t["smart_sub"])
