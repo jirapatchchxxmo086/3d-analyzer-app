@@ -1,8 +1,8 @@
-"""machining_estimator.py
-
+"""
+machining_estimator.py
 ========================
 โมดูลประเมินชั่วโมงเครื่องจักรสำหรับ Robot CNC (กัดโฟม) และ 3D Print FDM (PETG)
-พร้อมระบบคำนวณปริมาณวัตถุดิบโฟมและม้วนพลาสติก PETG
+ผสานระบบคำนวณก้อนโฟม v2 และระบบคำนวณ FDM PETG ละเอียด (Wall layers, Shell fraction, 1.2kg rolls)
 """
 
 from dataclasses import dataclass
@@ -33,20 +33,7 @@ MATERIAL_DENSITY_G_PER_CM3 = {"PETG": 1.27, "PLA": 1.24}
 # --- Robot Foam Parameters ---
 FOAM_HOURS_K = 4.6475
 FOAM_HOURS_EXPONENT = 0.9092
-FOAM_QTY_K = 0.2469
-FOAM_QTY_EXPONENT = 1.1285
 DEFAULT_FOAM_MAX_SEGMENT_MM = 1000.0
-
-# --- 3D Print FDM (PETG) Parameters — Global Multi-Model Calibrated ---
-FDM_GRAMS_PER_HOUR = 20.0
-FDM_PROGRAM_HOURS = 2.0
-FDM_SETUP_HOURS = 4.0
-FDM_GRAMS_PER_ROLL = 1000.0
-FDM_WEIGHT_K = 7100.0
-FDM_WEIGHT_EXPONENT = 1.15
-FDM_BASELINE_INFILL_PCT = 15.0
-FDM_CALIBRATED_SQM_RANGE = (0.35, 1.5)
-FDM_PETG_BAHT_PER_ROLL = 960.0
 
 
 def clamp(value, minimum, maximum):
@@ -110,26 +97,16 @@ def estimate_foam_cnc_hours(
 def estimate_foam_blocks_v2(
     surface_area_sqm: float, z_height_mm: float = 0.0
 ) -> float:
-    """สูตรคำนวณจำนวนก้อนโฟมกลาง (Dynamic Calibration)
-    ขนาดก้อนมาตรฐาน: 60 x 120 x 200 cm (1.44 cu.m.)
-    ปรับแต่งกลุ่มขนาดงานเพื่อให้อยู่ในกรอบ +-10%
-    """
+    """สูตรคำนวณจำนวนก้อนโฟมกลาง (Dynamic Calibration v2)"""
     surface_area_sqm = max(float(surface_area_sqm), 0.0)
 
     if surface_area_sqm <= 0:
         return 0.0
 
-    # 1. งานขนาดเล็ก - เล็กมาก (< 10 ตร.ม.) : ใช้ Baseline สูตรใหม่แม่นยำอยู่แล้ว (-4% ถึง +17%)
     if surface_area_sqm < 10.0:
         blocks_needed = surface_area_sqm * 0.30
-
-    # 2. งานทรงอ้วนแน่น/ปริมาตรสูง (เช่น กลุ่ม Mike 3m - 4m)
-    # เพิ่ม factor ชดเชยปริมาตรโฟมทรงตันเพื่อแก้ Error ติดลบ (-25% ถึง -37%)
     elif surface_area_sqm < 32.0 and z_height_mm <= 4000.0:
         blocks_needed = (surface_area_sqm**0.95) * 0.38
-
-    # 3. งานใหญ่มาก / ทรงสูงสเกล 6 - 8 เมตร (เช่น Sully 6m-8m, Elmo, Abby)
-    # ใช้ Non-linear scaling ลดค่าน้ำหนักพื้นที่ผิวที่สูงเกินจริง (แก้ Error บวก +25% ถึง +51%)
     else:
         blocks_needed = (surface_area_sqm**0.85) * 0.90
 
@@ -141,11 +118,9 @@ def estimate_foam_blocks_needed(
 ) -> Dict[str, Any]:
     """คำนวณจำนวนก้อนโฟม (เชื่อมโยงเข้ากับสูตรกลาง v2)"""
     surface_area_sqm = max(float(surface_area_sqm), 0.0)
-
     blocks_needed = estimate_foam_blocks_v2(
         surface_area_sqm=surface_area_sqm, z_height_mm=z_height_mm
     )
-
     return {
         "surface_area_sqm": round(surface_area_sqm, 3),
         "blocks_needed": blocks_needed,
@@ -154,91 +129,94 @@ def estimate_foam_blocks_needed(
     }
 
 
+# ==========================================================================
+# --- 3D Print FDM (PETG) Parameters & Advanced Logic (ผสานจาก fdm_estimator.py) ---
+# ==========================================================================
+FDM_ROLL_WEIGHT_G = 1200.0
+FDM_BASELINE_INFILL_PCT = 9.0
+FDM_BASELINE_WALLS = 2
+FDM_PETG_BAHT_PER_ROLL = 960.0
+
+FDM_GRAMS_PER_HOUR = 25.0
+FDM_WEIGHT_K = 8535.7
+FDM_WEIGHT_EXPONENT = 1.289
+FDM_CALIBRATED_SQM_RANGE = (0.35, 1.4)
+FDM_PROGRAM_HOURS = 2.0
+FDM_SETUP_HOURS = 4.0
+
+FDM_SHELL_FRACTION = 0.30
+FDM_WALL_LINE_MM = 0.45
+
+
+def ceil_rolls(rolls_exact: float) -> int:
+    """ปัดขึ้นเป็นม้วนเต็ม (กันเลขทศนิยมคลาดเคลื่อน เช่น 2.0000001)"""
+    return int(math.ceil(round(float(rolls_exact), 6))) if rolls_exact > 0 else 0
+
+
 def estimate_petg_rolls_from_hours(
     machine_hours: float,
-    waste_margin_pct: float = 8.0,
+    waste_margin_pct: float = 0.0,
     grams_per_hour: float = FDM_GRAMS_PER_HOUR,
-    grams_per_roll: float = FDM_GRAMS_PER_ROLL,
-    baht_per_roll: float = FDM_PETG_BAHT_PER_ROLL,
 ) -> Dict[str, Any]:
-    """คำนวณปริมาณม้วนพลาสติก PETG และต้นทุนวัตถุดิบโดยตรงจากชั่วโมงการพิมพ์ (Machine Hours)"""
-    machine_hours = max(float(machine_hours), 0.0)
-
-    net_weight_g = machine_hours * grams_per_hour
-    gross_weight_g = net_weight_g * (1.0 + (waste_margin_pct / 100.0))
-
-    rolls_exact = round(gross_weight_g / grams_per_roll, 2)
-    rolls_to_buy = math.ceil(gross_weight_g / grams_per_roll)
-    total_cost_baht = rolls_to_buy * baht_per_roll
-
+    """แปลงชั่วโมงพิมพ์ -> น้ำหนัก -> ม้วน (ปัดขึ้น) ใช้อัตรา 25 g/ชม. และน้ำหนักม้วน 1,200 กรัม"""
+    weight_g = max(float(machine_hours), 0.0) * grams_per_hour
+    rolls_exact = weight_g * (1.0 + waste_margin_pct / 100.0) / FDM_ROLL_WEIGHT_G
+    rolls_to_buy = ceil_rolls(rolls_exact)
     return {
-        "machine_hours": round(machine_hours, 2),
-        "net_weight_g": round(net_weight_g, 1),
-        "gross_weight_g": round(gross_weight_g, 1),
-        "rolls_exact": rolls_exact,
+        "machine_hours": round(float(machine_hours), 2),
+        "gross_weight_g": round(weight_g, 1),
+        "roll_weight_g": FDM_ROLL_WEIGHT_G,
+        "rolls_exact": round(rolls_exact, 2),
         "rolls_to_buy": rolls_to_buy,
-        "baht_per_roll": baht_per_roll,
-        "total_material_cost_baht": round(total_cost_baht, 0),
-        "note": (
-            f"Based on flow rate {grams_per_hour} g/hr and waste margin"
-            f" {waste_margin_pct}%"
-        ),
+        "total_material_cost_baht": round(rolls_to_buy * FDM_PETG_BAHT_PER_ROLL, 0),
+        "baht_per_roll": FDM_PETG_BAHT_PER_ROLL,
     }
 
 
 def estimate_3d_print_hours(
     volume_cm3: float = 0.0,
     surface_area_sqm: float = 0.0,
-    infill_pct: float = 15.0,
-    layer_height_mm: float = 0.28,
+    infill_pct: float = FDM_BASELINE_INFILL_PCT,
     complexity_level: int = 4,
     technology: str = "FDM",
     material: str = "PETG",
-    waste_margin_pct: float = 8.0,
+    wall_layers: int = 2,
+    weight_override_g: Optional[float] = None,
+    waste_margin_pct: float = 0.0,
+    layer_height_mm: float = 0.28,
 ) -> MachiningEstimate:
-    volume_cm3 = max(volume_cm3, 0.0)
-    area_sqm = max(surface_area_sqm, 0.0)
-
+    """
+    น้ำหนัก = (K x sqm^p) x ตัวคูณ infill + น้ำหนักผนังส่วนที่เพิ่ม/ลดจาก 2 ชั้น
+    ชั่วโมงพิมพ์ = น้ำหนัก / 25 g/ชม.   |   ม้วน = น้ำหนัก / 1200 g ปัดขึ้น
+    ถ้าใส่ weight_override_g (น้ำหนักจากสไลเซอร์) จะใช้ค่านั้นแทนสูตร ซึ่งแม่นที่สุด
+    """
+    area_sqm = max(float(surface_area_sqm), 0.0)
     if area_sqm == 0.0 and volume_cm3 > 0.0:
-        approx_radius_cm = ((3.0 * volume_cm3) / (4.0 * math.pi)) ** (
-            1.0 / 3.0
-        )
-        area_sqm = (4.0 * math.pi * (approx_radius_cm**2)) / 10000.0
+        r_cm = ((3.0 * float(volume_cm3)) / (4.0 * math.pi)) ** (1.0 / 3.0)
+        area_sqm = (4.0 * math.pi * r_cm ** 2) / 10000.0
 
-    infill_effective = max(float(infill_pct), 5.0)
-    infill_factor = infill_effective / FDM_BASELINE_INFILL_PCT
+    density = MATERIAL_DENSITY_G_PER_CM3.get(material, MATERIAL_DENSITY_G_PER_CM3["PETG"])
+    infill_eff = max(float(infill_pct), 5.0)
+    walls = max(1, int(wall_layers))
+    infill_factor = FDM_SHELL_FRACTION + (1.0 - FDM_SHELL_FRACTION) * infill_eff / FDM_BASELINE_INFILL_PCT
+    wall_extra_g = (walls - FDM_BASELINE_WALLS) * area_sqm * 10000.0 * (FDM_WALL_LINE_MM / 10.0) * density
 
-    base_weight_g = (
-        FDM_WEIGHT_K * (area_sqm**FDM_WEIGHT_EXPONENT) * infill_factor
-        if area_sqm > 0
-        else 0.0
-    )
-    gross_weight_g = base_weight_g * (1.0 + (waste_margin_pct / 100.0))
+    if weight_override_g and weight_override_g > 0:
+        weight_g, source = float(weight_override_g), "slicer"
+    elif area_sqm > 0:
+        weight_g = max(FDM_WEIGHT_K * area_sqm ** FDM_WEIGHT_EXPONENT * infill_factor + wall_extra_g, 0.0)
+        source = "formula"
+    else:
+        weight_g, source = 0.0, "none"
 
-    layer_factor = 0.28 / max(layer_height_mm, 0.1)
-    effective_grams_per_hour = FDM_GRAMS_PER_HOUR / layer_factor
-
-    machine_hours = (
-        gross_weight_g / effective_grams_per_hour if gross_weight_g > 0 else 0.0
-    )
-
-    hours_min = round(machine_hours * 0.85, 1)
-    hours_max = round(machine_hours * 1.15, 1)
-
-    program_hours = FDM_PROGRAM_HOURS if gross_weight_g > 0 else 0.0
-    setup_hours = FDM_SETUP_HOURS if gross_weight_g > 0 else 0.0
+    machine_hours = weight_g / FDM_GRAMS_PER_HOUR
+    program_hours = FDM_PROGRAM_HOURS if weight_g > 0 else 0.0
+    setup_hours = FDM_SETUP_HOURS if weight_g > 0 else 0.0
     billed_hours = machine_hours + program_hours
 
-    rolls_exact = round(gross_weight_g / FDM_GRAMS_PER_ROLL, 2)
-    rolls_to_buy = math.ceil(gross_weight_g / FDM_GRAMS_PER_ROLL)
-
-    density = MATERIAL_DENSITY_G_PER_CM3.get(
-        material, MATERIAL_DENSITY_G_PER_CM3["PETG"]
-    )
-    plastic_volume_cm3 = gross_weight_g / density if density > 0 else 0.0
-
+    rolls_exact = weight_g * (1.0 + waste_margin_pct / 100.0) / FDM_ROLL_WEIGHT_G
+    rolls_to_buy = ceil_rolls(rolls_exact)
     lo, hi = FDM_CALIBRATED_SQM_RANGE
-    outside_range = area_sqm > 0 and not (lo <= area_sqm <= hi)
 
     return MachiningEstimate(
         hours=round(billed_hours, 2),
@@ -246,25 +224,30 @@ def estimate_3d_print_hours(
             "machine_type": "3D Print FDM",
             "surface_area_sqm": round(area_sqm, 4),
             "infill_pct": infill_pct,
+            "wall_layers": walls,
             "layer_height_mm": layer_height_mm,
             "material": material,
             "density_g_per_cm3": density,
-            "net_weight_g": round(base_weight_g, 1),
-            "estimated_weight_g": round(gross_weight_g, 1),
-            "petg_rolls": rolls_exact,
-            "petg_rolls_exact": rolls_exact,
+            "weight_source": source,
+            "net_weight_g": round(weight_g, 1),
+            "estimated_weight_g": round(weight_g, 1),
+            "petg_roll_weight_g": FDM_ROLL_WEIGHT_G,
+            "petg_rolls": round(rolls_exact, 2),
+            "petg_rolls_exact": round(rolls_exact, 2),
             "petg_rolls_allocated": rolls_to_buy,
-            "petg_cost_baht": round(rolls_exact * FDM_PETG_BAHT_PER_ROLL, 0),
-            "effective_volume_cm3": round(plastic_volume_cm3, 2),
-            "effective_grams_per_hour": round(effective_grams_per_hour, 1),
+            "petg_rolls_to_buy": rolls_to_buy,
+            "petg_cost_baht": round(rolls_to_buy * FDM_PETG_BAHT_PER_ROLL, 0),
+            "petg_cost_exact_baht": round(rolls_exact * FDM_PETG_BAHT_PER_ROLL, 0),
+            "effective_volume_cm3": round(weight_g / density, 2) if density > 0 else 0.0,
+            "effective_grams_per_hour": FDM_GRAMS_PER_HOUR,
             "machine_hours": round(machine_hours, 2),
-            "machine_hours_range": (hours_min, hours_max),
+            "machine_hours_range": (round(machine_hours * 0.8, 1), round(machine_hours * 1.2, 1)),
             "program_hours": round(program_hours, 2),
             "setup_hours": round(setup_hours, 2),
             "billed_total_hours_excl_setup": round(billed_hours, 2),
             "hourly_rate_baht": 50,
-            "outside_calibrated_range": outside_range,
+            "outside_calibrated_range": source == "formula" and not (lo <= area_sqm <= hi),
             "calibrated_sqm_range": FDM_CALIBRATED_SQM_RANGE,
-            "calibration_note": "FDM Global Calibrated Model",
+            "calibration_note": "FDM: hours = weight/25 g/hr; weight from surface area (7 real quotes); rolls 1.2 kg rounded up",
         },
     )
