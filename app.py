@@ -656,7 +656,7 @@ lang = st.sidebar.selectbox(
 st.session_state["language"] = lang
 t = TEXTS[lang]
 
-nav_options = [t["page_1_name"], t["page_2_name"]], t["page_smart_name"]]
+nav_options = [t["page_1_name"], t["page_2_name"], t["page_smart_name"]]
 if "nav_page_choice" not in st.session_state or st.session_state["nav_page_choice"] not in nav_options:
     st.session_state["nav_page_choice"] = nav_options[0]
 
