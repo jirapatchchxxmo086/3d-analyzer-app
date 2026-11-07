@@ -10,6 +10,7 @@ from string import Template
 import streamlit.components.v1 as components
 import auth
 from grid_visualizer import create_foam_grid_visualizer, get_submeshes, FOAM_GRID_WIDTH_MM, FOAM_GRID_LENGTH_MM
+from foam_partition import render_smart_partition_page
 
 auth.require_login()
 
@@ -139,6 +140,7 @@ TEXTS = {
         "sidebar_menu": "📌 เมนูหลัก",
         "page_1_name": "📦 แบบจำลอง 3 มิติและพื้นผิว",
         "page_2_name": "💰 ประเมินราคา",
+        "page_smart_name": "🧩 วิเคราะห์แบ่งก้อนโฟมอัตโนมัติ",
         "lang_select": "🌐 เลือกภาษา / Language",
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
         "p1_sub": "อัปโหลดไฟล์โมเดล 3D เพื่อวิเคราะห์ขนาด Bounding Box, พื้นที่ผิว, ปริมาตร และความซับซ้อนของพื้นผิวอัตโนมัติ",
@@ -228,11 +230,14 @@ TEXTS = {
         "mat_cost": "ค่าวัสดุและอุปกรณ์",
         "paint_cost": "ค่าเคลือบผิว & ทำสี",
         "Total_Estimate_Cost": "🏷️ ราคารวมประมาณการ (Total Estimate Cost)",
+        "smart_title": "🧩 ระบบวิเคราะห์และประเมินการแบ่งก้อนโฟมอัตโนมัติ (Smart Partition)",
+        "smart_sub": "ระบบคำนวณจำนวนส่วนที่เหมาะสมที่สุดตามรูปทรง เพื่อลดขยะโฟมและต้นทุนผลิตโดยอัตโนมัติ",
     },
     "EN": {
         "sidebar_menu": "📌 Main Menu",
         "page_1_name": "📦 3D Model & Surface",
         "page_2_name": "💰 Cost Estimator",
+        "page_smart_name": "🧩 Smart Foam Partitioning",
         "lang_select": "🌐 Select Language / เลือกภาษา",
         "p1_title": "📦 3D Model Dimension & Surface Area Analyzer",
         "p1_sub": "Upload a 3D model file to automatically extract bounding box dimensions, surface area, volume, and surface detail complexity.",
@@ -322,6 +327,8 @@ TEXTS = {
         "mat_cost": "Material & Equipment Cost",
         "paint_cost": "Coating & Painting Cost",
         "Total_Estimate_Cost": "🏷️ Total Estimated Cost",
+        "smart_title": "🧩 ระบบวิเคราะห์และประเมินการแบ่งก้อนโฟมอัตโนมัติ (Smart Partition)",
+        "smart_sub": "ระบบคำนวณจำนวนส่วนที่เหมาะสมที่สุดตามรูปทรง เพื่อลดขยะโฟมและต้นทุนผลิตโดยอัตโนมัติ",
     }
 }
 
@@ -649,7 +656,7 @@ lang = st.sidebar.selectbox(
 st.session_state["language"] = lang
 t = TEXTS[lang]
 
-nav_options = [t["page_1_name"], t["page_2_name"]]
+nav_options = [t["page_1_name"], t["page_2_name"]], t["page_smart_name"]]
 if "nav_page_choice" not in st.session_state or st.session_state["nav_page_choice"] not in nav_options:
     st.session_state["nav_page_choice"] = nav_options[0]
 
@@ -1792,3 +1799,6 @@ elif page == t["page_2_name"]:
 
     st.markdown(f"### {t['Total_Estimate_Cost']}")
     st.title(f"฿ {subtotal:,.2f} THB")
+
+elif page == t["page_smart_name"]:
+    render_smart_partition_page(lang=lang, title=t["smart_title"], subtitle=t["smart_sub"])
